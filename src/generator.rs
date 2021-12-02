@@ -106,6 +106,20 @@ where
         .map(|((a, b), c)| (beta * a + &(alpha * b) + c) * &gamma_inverse)
         .collect::<Vec<_>>();
 
+    // println!("abc");
+    // println!("a:");
+    // for i in a[..num_instance_variables].iter() {
+    //     println!("{:?}", i.into_repr());
+    // }
+    // println!("b:");
+    // for i in b[..num_instance_variables].iter() {
+    //     println!("{:?}", i.into_repr());
+    // }
+    // println!("c:");
+    // for i in c[..num_instance_variables].iter() {
+    //     println!("{:?}", i.into_repr());
+    // }
+
     let l = cfg_iter!(a)
         .zip(&b)
         .zip(&c)
@@ -207,7 +221,7 @@ where
 
     let eta_gamma_inv_g1 = g1_generator.mul((eta * &gamma_inverse).into_repr());
 
-    let link_rows = 2; // we're comparirng two commitments
+    let link_rows = 2; // we're comparing two commitments
     let link_cols = gamma_abc_g1.len() + 2; // we have len inputs and 1 hiding factor per row
     let link_pp = PP::<E::G1Affine, E::G2Affine> {
         l: link_rows,
@@ -215,6 +229,7 @@ where
         g1: E::G1Affine::prime_subgroup_generator(),
         g2: E::G2Affine::prime_subgroup_generator(),
     };
+    println!("gamma_abc_g1 len={:?}", gamma_abc_g1.len());
 
     let mut link_m = SparseMatrix::<E::G1Affine>::new(link_rows, link_cols);
     link_m.insert_row_slice(0, 0, &pedersen_bases);

@@ -39,6 +39,8 @@ ark-mnt6-298 = { version = "^0.3.0", default-features = false, features = ["r1cs
 ark-mnt4-753 = { version = "^0.3.0", default-features = false, features = ["r1cs", "curve"] }
 ark-mnt6-753 = { version = "^0.3.0", default-features = false, features = ["r1cs"] }
 ark-groth16 = { version = "^0.3.0", default-features = false }
+tracing = { version = "0.1", default-features = false, features = [ "attributes" ] }
+tracing-subscriber = { version = "0.2" }
 
 [profile.release]
 opt-level = 3

@@ -32,7 +32,7 @@ pub fn verify_proof<E: PairingEngine>(
         &pvk.vk.link_vk,
         &commitments
             .iter()
-            .map(|p| p.into_affine())
+            .map(|p| p.into_affine())// Use batch-to-affine
             .collect::<Vec<_>>(),
         &proof.link_pi,
     );
@@ -71,6 +71,7 @@ pub fn verify_commitment<E: PairingEngine>(
     }
     g_ic.add_assign(&pvk.vk.eta_gamma_inv_g1.mul(v.into_repr()));
 
+    // Question: What is the point of this?
     let mut g_link = pvk.vk.link_bases[0].into_projective();
     for (i, b) in public_inputs.iter().zip(pvk.vk.link_bases.iter().skip(1)) {
         g_link.add_assign(&b.mul(i.into_repr()));

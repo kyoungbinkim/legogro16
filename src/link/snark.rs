@@ -1,3 +1,7 @@
+//! zkSNARK for Linear Subspaces as defined in appendix D of the paper.
+//! Use to prove knowledge of openings of multiple Pedersen commitments. Can also prove knowledge
+//! and equality of committed values in multiple commitments
+
 use crate::link::matrix::*;
 use ark_ec::{AffineCurve, PairingEngine, ProjectiveCurve};
 use ark_ff::{bytes::ToBytes, One, UniformRand};
@@ -45,6 +49,7 @@ impl<
     }
 }
 
+/// Evaluation key
 #[derive(Clone, Default, PartialEq, Debug, CanonicalSerialize, CanonicalDeserialize)]
 pub struct EK<G1: Clone + ToBytes + Default + CanonicalSerialize + CanonicalDeserialize> {
     pub p: Vec<G1>,
@@ -56,6 +61,7 @@ impl<G1: Clone + ToBytes + Default + CanonicalSerialize + CanonicalDeserialize> 
     }
 }
 
+/// Verification key
 #[derive(Clone, Default, PartialEq, Debug, CanonicalSerialize, CanonicalDeserialize)]
 pub struct VK<G2: Clone + ToBytes + Default + CanonicalSerialize + CanonicalDeserialize> {
     pub c: Vec<G2>,
@@ -89,6 +95,7 @@ fn vec_to_g2<PE: PairingEngine>(
     pp: &PP<PE::G1Affine, PE::G2Affine>,
     v: &Vec<PE::Fr>,
 ) -> Vec<PE::G2Affine> {
+    // TODO: use MSM
     v.iter()
         .map(|x| pp.g2.mul(*x).into_affine())
         .collect::<Vec<_>>()
@@ -111,7 +118,13 @@ impl<PE: PairingEngine> SubspaceSnark for PESubspaceSnark<PE> {
 
     type Proof = PE::G1Affine;
 
+    /// Matrix should be such that a column will have more than 1 non-zero item only if those values
+    /// are equal. Eg for matrix below, h2 and h3 commit to same value
+    /// h1, 0, 0, 0
+    /// 0, h2, 0, 0
+    /// 0, h3, h4, 0
     fn keygen<R: Rng>(rng: &mut R, pp: &Self::PP, m: Self::KMtx) -> (Self::EK, Self::VK) {
+        // `k` is the trapdoor
         let mut k: Vec<PE::Fr> = Vec::with_capacity(pp.l);
         for _ in 0..pp.l {
             k.push(PE::Fr::rand(rng));
@@ -119,9 +132,9 @@ impl<PE: PairingEngine> SubspaceSnark for PESubspaceSnark<PE> {
 
         let a = PE::Fr::rand(rng);
 
-        let p = SparseLinAlgebra::<PE>::sparse_vector_matrix_mult(&k, &m, pp.t);
+        let p = SparseLinAlgebra::<PE>::sparse_vector_matrix_mult(&k, &m);
 
-        let c = scalar_vector_mult::<PE>(&a, &k, pp.l);
+        let c = scale_vector::<PE>(&a, &k);
         let ek = EK::<PE::G1Affine> { p };
         let vk = VK::<PE::G2Affine> {
             c: vec_to_g2::<PE>(pp, &c),
@@ -130,17 +143,17 @@ impl<PE: PairingEngine> SubspaceSnark for PESubspaceSnark<PE> {
         (ek, vk)
     }
 
-    fn prove(pp: &Self::PP, ek: &Self::EK, x: &[Self::InVec]) -> Self::Proof {
-        assert_eq!(pp.t, x.len());
-        inner_product::<PE>(x, &ek.p)
+    fn prove(pp: &Self::PP, ek: &Self::EK, w: &[Self::InVec]) -> Self::Proof {
+        assert_eq!(pp.t, w.len());
+        inner_product::<PE>(w, &ek.p)
     }
 
-    fn verify(pp: &Self::PP, vk: &Self::VK, y: &[Self::OutVec], pi: &Self::Proof) -> bool {
-        assert_eq!(pp.l, y.len());
+    fn verify(pp: &Self::PP, vk: &Self::VK, x: &[Self::OutVec], pi: &Self::Proof) -> bool {
+        assert_eq!(pp.l, x.len());
 
         let mut pairs = vec![];
-        for i in 0..y.len() {
-            pairs.push((PE::G1Prepared::from(y[i]), PE::G2Prepared::from(vk.c[i])));
+        for i in 0..x.len() {
+            pairs.push((PE::G1Prepared::from(x[i]), PE::G2Prepared::from(vk.c[i])));
         }
         pairs.push((PE::G1Prepared::from(*pi), PE::G2Prepared::from(vk.a.neg())));
         PE::Fqk::one() == PE::product_of_pairings(pairs.iter())

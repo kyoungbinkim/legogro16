@@ -1,3 +1,5 @@
+//! Utils for matrix and vector operations
+
 use ark_ec::{AffineCurve, PairingEngine, ProjectiveCurve};
 use ark_ff::Zero;
 use ark_std::ops::{AddAssign, Mul};
@@ -21,8 +23,8 @@ type Col<T> = Vec<CoeffPos<T>>;
 #[derive(Clone, Debug)]
 pub struct SparseMatrix<T> {
     cols: Vec<Col<T>>, // a vector of columns
-    pub nr: usize,
-    pub nc: usize,
+    pub nr: usize,  // no. of rows
+    pub nc: usize,  // no. of columns
 }
 
 impl<T: Copy> SparseMatrix<T> {
@@ -35,12 +37,13 @@ impl<T: Copy> SparseMatrix<T> {
         }
     }
 
+    /// Insert value `v` in the column index `c` at row index `r`
     pub fn insert_val(&mut self, r: usize, c: usize, v: &T) {
         let coeff_pos = CoeffPos { pos: r, val: *v };
         self.cols[c].push(coeff_pos);
     }
 
-    // insert a continuous sequence of values at row r starting from c_offset
+    /// insert a continuous sequence of values at row r starting from c_offset
     pub fn insert_row_slice(&mut self, r: usize, c_offset: usize, vs: &[T]) {
         // NB: could be improved in efficiency by first extending the vector
         for (i, x) in vs.iter().enumerate() {
@@ -58,7 +61,8 @@ pub struct SparseLinAlgebra<PE: PairingEngine> {
 }
 
 impl<PE: PairingEngine> SparseLinAlgebra<PE> {
-    // this is basically a multi-exp
+    /// Inner product of a column of a sparse matrix and another (sparse) vector
+    /// this is basically a multi-exp
     pub fn sparse_inner_product(v: &Vec<PE::Fr>, w: &Col<PE::G1Affine>) -> PE::G1Affine {
         let mut res: PE::G1Projective = PE::G1Projective::zero();
         for coeffpos in w {
@@ -73,13 +77,15 @@ impl<PE: PairingEngine> SparseLinAlgebra<PE> {
         res.into_affine()
     }
 
+    /// Inner products of all columns of a sparse matrix and another (sparse) vector to compute the
+    /// matrix multiplication `m^T \dot v` where `m^T` is the transpose of `m`.
+    /// v has dimensions `v.len() x 1` and m has dimensions `nr x nc`. Returns a matrix of dimension `nr x 1`
     pub fn sparse_vector_matrix_mult(
         v: &Vec<PE::Fr>,
         m: &SparseMatrix<PE::G1Affine>,
-        t: usize,
     ) -> Vec<PE::G1Affine> {
         // the result should contain every column of m multiplied by v
-        let mut res: Vec<PE::G1Affine> = Vec::with_capacity(t);
+        let mut res: Vec<PE::G1Affine> = Vec::with_capacity(m.nc);
         for c in 0..m.nc {
             res.push(Self::sparse_inner_product(&v, &m.get_col(c)));
         }
@@ -87,6 +93,7 @@ impl<PE: PairingEngine> SparseLinAlgebra<PE> {
     }
 }
 
+/// MSM between a scalar vector and a G1 vector
 pub fn inner_product<PE: PairingEngine>(v: &[PE::Fr], w: &[PE::G1Affine]) -> PE::G1Affine {
     assert_eq!(v.len(), w.len());
     let mut res: PE::G1Projective = PE::G1Projective::zero();
@@ -97,8 +104,9 @@ pub fn inner_product<PE: PairingEngine>(v: &[PE::Fr], w: &[PE::G1Affine]) -> PE:
     res.into_affine()
 }
 
-pub fn scalar_vector_mult<PE: PairingEngine>(a: &PE::Fr, v: &[PE::Fr], l: usize) -> Vec<PE::Fr> {
-    let mut res: Vec<PE::Fr> = Vec::with_capacity(l);
+/// Scale given vector `v` by scalar `a`
+pub fn scale_vector<PE: PairingEngine>(a: &PE::Fr, v: &[PE::Fr]) -> Vec<PE::Fr> {
+    let mut res: Vec<PE::Fr> = Vec::with_capacity(v.len());
     for i in 0..v.len() {
         let x: PE::Fr = a.mul(&v[i]);
         res.push(x);
