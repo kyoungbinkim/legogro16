@@ -33,6 +33,7 @@ struct MyLessSillyCircuit<F: Field> {
     d: Option<F>,
 }
 
+/// Circuit with 2 public inputs, 1st should be equal to a * b and 2nd equal to c * d
 #[derive(Clone)]
 struct MyLessSillyCircuit1<F: Field> {
     a: Option<F>,
