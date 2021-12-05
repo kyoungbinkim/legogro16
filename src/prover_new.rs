@@ -1,4 +1,8 @@
-use crate::{link::{PESubspaceSnark, SubspaceSnark}, r1cs_to_qap::R1CStoQAP, Proof, ProvingKeyNew};
+use crate::{
+    link::{PESubspaceSnark, SubspaceSnark},
+    r1cs_to_qap::R1CStoQAP,
+    Proof, ProvingKeyNew,
+};
 use ark_ec::{msm::VariableBaseMSM, AffineCurve, PairingEngine, ProjectiveCurve};
 use ark_ff::{PrimeField, UniformRand, Zero};
 use ark_poly::GeneralEvaluationDomain;
@@ -21,10 +25,10 @@ pub fn create_random_proof_new<E, C, R>(
     pk: &ProvingKeyNew<E>,
     rng: &mut R,
 ) -> R1CSResult<Proof<E>>
-    where
-        E: PairingEngine,
-        C: ConstraintSynthesizer<E::Fr>,
-        R: Rng,
+where
+    E: PairingEngine,
+    C: ConstraintSynthesizer<E::Fr>,
+    R: Rng,
 {
     let r = E::Fr::rand(rng);
     let s = E::Fr::rand(rng);
@@ -42,10 +46,11 @@ pub fn create_proof_new<E, C>(
     v: E::Fr,
     link_v: E::Fr,
 ) -> R1CSResult<Proof<E>>
-    where
-        E: PairingEngine,
-        C: ConstraintSynthesizer<E::Fr>,
+where
+    E: PairingEngine,
+    C: ConstraintSynthesizer<E::Fr>,
 {
+    // TODO: Fix some unnecessary memory allocations
     type D<F> = GeneralEvaluationDomain<F>;
 
     let prover_time = start_timer!(|| "Groth16::Prover");
@@ -82,43 +87,31 @@ pub fn create_proof_new<E, C>(
         .map(|s| s.into_repr())
         .collect::<Vec<_>>();
 
-    // TODO: Too many clones, fix!
+    let committed_witnesses = &aux_assignment[..pk.commit_witness_count];
+    let uncommitted_witnesses = &aux_assignment[pk.commit_witness_count..];
 
-    let committed_witnesses = &prover.witness_assignment[..pk.commit_witness_count];
-    let uncommitted_witnesses = aux_assignment[pk.commit_witness_count..].to_vec();
-
-    let l_aux_acc = VariableBaseMSM::multi_scalar_mul(&pk.l_query, &uncommitted_witnesses);
+    let l_aux_acc = VariableBaseMSM::multi_scalar_mul(&pk.l_query, uncommitted_witnesses);
 
     let r_s_delta_g1 = pk.delta_g1.into_projective().mul(r_repr).mul(s_repr);
     let v_eta_delta_inv = pk.eta_delta_inv_g1.into_projective().mul(v.into_repr());
 
     end_timer!(c_acc_time);
 
-    let input_assignment_with_one_field = prover.instance_assignment.clone();
-
-    let input_assignment_with_one = input_assignment_with_one_field
+    let input_assignment_wth_one = prover
+        .instance_assignment
         .iter()
         .map(|s| s.into_repr())
         .collect::<Vec<_>>();
 
-    let input_assignment = input_assignment_with_one[1..].to_vec();
-    // for i in 0..input_assignment.len() {
-    //     println!("ins-{}-{:?}", i, input_assignment[i])
-    // }
-    // for i in 0..aux_assignment.len() {
-    //     println!("wit-{}-{:?}", i, aux_assignment[i])
-    // }
-
-    let commit_assignments_with_one_field = [&input_assignment_with_one_field[..], committed_witnesses].concat();
-    let commit_assignments_with_one = commit_assignments_with_one_field
-        .iter()
-        .map(|s| s.into_repr())
-        .collect::<Vec<_>>();
+    let mut commit_assignments = input_assignment_wth_one.clone();
+    commit_assignments.extend_from_slice(committed_witnesses);
 
     drop(prover);
     drop(cs);
 
-    let assignment = [&input_assignment[..], &aux_assignment[..]].concat();
+    let mut assignment = vec![];
+    assignment.extend_from_slice(&input_assignment_wth_one[1..]);
+    assignment.extend_from_slice(&aux_assignment);
     drop(aux_assignment);
 
     // Compute A
@@ -166,7 +159,7 @@ pub fn create_proof_new<E, C>(
 
     let gamma_abc_inputs_source = &pk.vk.gamma_abc_g1;
     let gamma_abc_inputs_acc =
-        VariableBaseMSM::multi_scalar_mul(gamma_abc_inputs_source, &commit_assignments_with_one);
+        VariableBaseMSM::multi_scalar_mul(gamma_abc_inputs_source, &commit_assignments);
 
     let v_eta_gamma_inv = pk.vk.eta_gamma_inv_g1.into_projective().mul(v.into_repr());
 
@@ -174,25 +167,24 @@ pub fn create_proof_new<E, C>(
     g_d += &v_eta_gamma_inv;
     end_timer!(d_acc_time);
 
-    let input_assignment_with_one_with_link_hider: Vec<E::Fr> =
-        [&commit_assignments_with_one_field, &[link_v][..]].concat();
-    let input_assignment_with_one_with_hiders: Vec<E::Fr> =
-        [&input_assignment_with_one_with_link_hider, &[v][..]].concat();
-    let link_time = start_timer!(|| "Compute CP_{link}");
-    let link_pi = PESubspaceSnark::<E>::prove(
-        &pk.vk.link_pp,
-        &pk.link_ek,
-        &input_assignment_with_one_with_hiders,
-    );
-    // println!("input_assignment_with_one_with_hiders len={:?}", input_assignment_with_one_with_hiders.len());
-    // println!("input_assignment_with_one_with_hiders: {:?}", input_assignment_with_one_with_hiders);
+    let mut commit_assignments_with_link_hider = vec![];
+    commit_assignments_with_link_hider.append(&mut commit_assignments);
+    commit_assignments_with_link_hider.push(link_v.into_repr());
 
     let pedersen_bases_affine = &pk.vk.link_bases;
-    let pedersen_values_repr = input_assignment_with_one_with_link_hider
+    let g_d_link = VariableBaseMSM::multi_scalar_mul(
+        &pedersen_bases_affine,
+        &commit_assignments_with_link_hider,
+    );
+
+    let mut ss_snark_witness = commit_assignments_with_link_hider
         .into_iter()
-        .map(|v| v.into_repr())
+        .map(|b| E::Fr::from_repr(b).unwrap())
         .collect::<Vec<_>>();
-    let g_d_link = VariableBaseMSM::multi_scalar_mul(&pedersen_bases_affine, &pedersen_values_repr);
+    ss_snark_witness.push(v);
+
+    let link_time = start_timer!(|| "Compute CP_{link}");
+    let link_pi = PESubspaceSnark::<E>::prove(&pk.vk.link_pp, &pk.link_ek, &ss_snark_witness);
 
     end_timer!(link_time);
 

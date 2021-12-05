@@ -101,12 +101,12 @@ where
         .collect::<Vec<_>>();
 
     let input_assignment = input_assignment_with_one[1..].to_vec();
-    for i in 0..input_assignment.len() {
-        println!("ins-{}-{:?}", i, input_assignment[i])
-    }
-    for i in 0..aux_assignment.len() {
-        println!("wit-{}-{:?}", i, aux_assignment[i])
-    }
+    // for i in 0..input_assignment.len() {
+    //     println!("ins-{}-{:?}", i, input_assignment[i])
+    // }
+    // for i in 0..aux_assignment.len() {
+    //     println!("wit-{}-{:?}", i, aux_assignment[i])
+    // }
 
     drop(prover);
     drop(cs);
@@ -178,8 +178,14 @@ where
         &pk.link_ek,
         &input_assignment_with_one_with_hiders,
     );
-    println!("input_assignment_with_one_with_hiders len={:?}", input_assignment_with_one_with_hiders.len());
-    println!("input_assignment_with_one_with_hiders: {:?}", input_assignment_with_one_with_hiders);
+    // println!(
+    //     "input_assignment_with_one_with_hiders len={:?}",
+    //     input_assignment_with_one_with_hiders.len()
+    // );
+    // println!(
+    //     "input_assignment_with_one_with_hiders: {:?}",
+    //     input_assignment_with_one_with_hiders
+    // );
 
     // Question: While creating matrix, 2 additional columns were created for pedersen bases but only 1
     // is used as input_assignment_with_one_with_link_hider is used.

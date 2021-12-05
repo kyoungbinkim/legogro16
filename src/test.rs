@@ -6,15 +6,15 @@ use ark_ec::{PairingEngine, ProjectiveCurve};
 use ark_ff::{PrimeField, UniformRand};
 use ark_std::rand::{rngs::StdRng, SeedableRng};
 
-use core::ops::MulAssign;
 use ark_ec::group::Group;
+use core::ops::MulAssign;
 
 use ark_ff::{Field, Zero};
+use ark_relations::r1cs::{ConstraintLayer, ConstraintSystem, LcIndex, TracingMode, Variable};
 use ark_relations::{
     lc,
     r1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError},
 };
-use ark_relations::r1cs::{ConstraintSystem, LcIndex, Variable, ConstraintLayer, TracingMode};
 use tracing_subscriber::layer::SubscriberExt;
 
 /// Circuit for computation a * b
@@ -81,26 +81,20 @@ impl<ConstraintF: Field> ConstraintSynthesizer<ConstraintF> for MyLessSillyCircu
         // a * b
         let e_value = if self.a.is_some() && self.b.is_some() {
             Some(self.a.unwrap().mul(self.b.unwrap()))
-        } else {None};
-        let e =
-            cs.new_witness_variable(|| e_value.ok_or(SynthesisError::AssignmentMissing))?;
-        cs.enforce_constraint(
-            lc!() + a,
-            lc!() + b,
-            lc!() + e,
-        )?;
+        } else {
+            None
+        };
+        let e = cs.new_witness_variable(|| e_value.ok_or(SynthesisError::AssignmentMissing))?;
+        cs.enforce_constraint(lc!() + a, lc!() + b, lc!() + e)?;
 
         // c * d
         let f_value = if self.c.is_some() && self.d.is_some() {
             Some(self.c.unwrap().mul(self.d.unwrap()))
-        } else {None};
-        let f =
-            cs.new_witness_variable(|| f_value.ok_or(SynthesisError::AssignmentMissing))?;
-        cs.enforce_constraint(
-            lc!() + c,
-            lc!() + d,
-            lc!() + f,
-        )?;
+        } else {
+            None
+        };
+        let f = cs.new_witness_variable(|| f_value.ok_or(SynthesisError::AssignmentMissing))?;
+        cs.enforce_constraint(lc!() + c, lc!() + d, lc!() + f)?;
 
         let y = cs.new_input_variable(|| {
             let e = e_value.ok_or(SynthesisError::AssignmentMissing)?;
@@ -109,11 +103,7 @@ impl<ConstraintF: Field> ConstraintSynthesizer<ConstraintF> for MyLessSillyCircu
             Ok(e + f)
         })?;
 
-        cs.enforce_constraint(
-            lc!() + e + f,
-            lc!() + Variable::One,
-            lc!() + y,
-        )?;
+        cs.enforce_constraint(lc!() + e + f, lc!() + Variable::One, lc!() + y)?;
 
         Ok(())
     }
@@ -129,23 +119,11 @@ impl<ConstraintF: Field> ConstraintSynthesizer<ConstraintF> for MyLessSillyCircu
         let c = cs.new_witness_variable(|| self.c.ok_or(SynthesisError::AssignmentMissing))?;
         let d = cs.new_witness_variable(|| self.d.ok_or(SynthesisError::AssignmentMissing))?;
 
-        let e = cs.new_input_variable(|| {
-            Ok(self.a.unwrap().mul(self.b.unwrap()))
-        })?;
-        cs.enforce_constraint(
-            lc!() + a,
-            lc!() + b,
-            lc!() + e,
-        )?;
+        let e = cs.new_input_variable(|| Ok(self.a.unwrap().mul(self.b.unwrap())))?;
+        cs.enforce_constraint(lc!() + a, lc!() + b, lc!() + e)?;
 
-        let f = cs.new_input_variable(|| {
-            Ok(self.c.unwrap().mul(self.d.unwrap()))
-        })?;
-        cs.enforce_constraint(
-            lc!() + c,
-            lc!() + d,
-            lc!() + f,
-        )?;
+        let f = cs.new_input_variable(|| Ok(self.c.unwrap().mul(self.d.unwrap())))?;
+        cs.enforce_constraint(lc!() + c, lc!() + d, lc!() + f)?;
 
         Ok(())
     }
@@ -194,14 +172,7 @@ where
         // println!("{:?}", cs.to_matrices());
 
         // Create a LegoGro16 proof with our parameters.
-        let proof = create_random_proof(
-            circuit,
-            v,
-            link_v,
-            &params,
-            &mut rng,
-        )
-        .unwrap();
+        let proof = create_random_proof(circuit, v, link_v, &params, &mut rng).unwrap();
 
         assert!(verify_proof(&pvk, &proof).unwrap());
         assert!(verify_commitment(&pvk, &proof, &[c], &v, &link_v).unwrap());
@@ -211,8 +182,8 @@ where
 }
 
 fn test_prove_and_verify_1<E>(n_iters: usize)
-    where
-        E: PairingEngine,
+where
+    E: PairingEngine,
 {
     let mut rng = StdRng::seed_from_u64(0u64);
 
@@ -221,11 +192,16 @@ fn test_prove_and_verify_1<E>(n_iters: usize)
         .collect::<Vec<_>>();
 
     let params = generate_random_parameters::<E, _, _>(
-        MyLessSillyCircuit { a: None, b: None, c: None, d: None },
+        MyLessSillyCircuit {
+            a: None,
+            b: None,
+            c: None,
+            d: None,
+        },
         &pedersen_bases,
         &mut rng,
     )
-        .unwrap();
+    .unwrap();
 
     let pvk = prepare_verifying_key::<E>(&params.vk);
 
@@ -277,14 +253,7 @@ fn test_prove_and_verify_1<E>(n_iters: usize)
         // println!("{:?}", cs.constraint_names());
         // println!("{:?}", cs.to_matrices());
 
-        let proof = create_random_proof(
-            circuit,
-            v,
-            link_v,
-            &params,
-            &mut rng,
-        )
-            .unwrap();
+        let proof = create_random_proof(circuit, v, link_v, &params, &mut rng).unwrap();
 
         assert!(verify_proof(&pvk, &proof).unwrap());
         assert!(verify_commitment(&pvk, &proof, &[y], &v, &link_v).unwrap());
@@ -294,8 +263,8 @@ fn test_prove_and_verify_1<E>(n_iters: usize)
 }
 
 fn test_prove_and_verify_2<E>(n_iters: usize)
-    where
-        E: PairingEngine,
+where
+    E: PairingEngine,
 {
     let mut rng = StdRng::seed_from_u64(0u64);
 
@@ -304,11 +273,16 @@ fn test_prove_and_verify_2<E>(n_iters: usize)
         .collect::<Vec<_>>();
 
     let params = generate_random_parameters::<E, _, _>(
-        MyLessSillyCircuit1 { a: None, b: None, c: None, d: None },
+        MyLessSillyCircuit1 {
+            a: None,
+            b: None,
+            c: None,
+            d: None,
+        },
         &pedersen_bases,
         &mut rng,
     )
-        .unwrap();
+    .unwrap();
 
     let pvk = prepare_verifying_key::<E>(&params.vk);
 
@@ -340,14 +314,7 @@ fn test_prove_and_verify_2<E>(n_iters: usize)
             d: Some(d),
         };
 
-        let proof = create_random_proof(
-            circuit,
-            v,
-            link_v,
-            &params,
-            &mut rng,
-        )
-            .unwrap();
+        let proof = create_random_proof(circuit, v, link_v, &params, &mut rng).unwrap();
 
         assert!(verify_proof(&pvk, &proof).unwrap());
         assert!(verify_commitment(&pvk, &proof, &[e, f], &v, &link_v).unwrap());

@@ -1,21 +1,20 @@
 use crate::{
-    generator_new::generate_random_parameters_new, prepare_verifying_key, prover_new::create_random_proof_new, verify_proof, verifier_new::verify_commitment_new
+    generator_new::generate_random_parameters_new, prepare_verifying_key,
+    prover_new::create_random_proof_new, verifier_new::verify_commitment_new, verify_proof,
 };
 use ark_ec::{AffineCurve, PairingEngine, ProjectiveCurve};
 use ark_ff::{PrimeField, UniformRand};
 use ark_std::rand::{rngs::StdRng, SeedableRng};
 
 use core::ops::MulAssign;
-use ark_ec::group::Group;
 
-use ark_ff::{Field, Zero};
+use crate::verifier_new::get_commitment_to_witnesses;
+use ark_ff::Field;
+use ark_relations::r1cs::Variable;
 use ark_relations::{
     lc,
     r1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError},
 };
-use ark_relations::r1cs::{ConstraintSystem, LcIndex, Variable, ConstraintLayer, TracingMode};
-use tracing_subscriber::layer::SubscriberExt;
-use crate::verifier_new::get_commitment_to_witnesses;
 
 /// Circuit for computation a * b
 #[derive(Clone)]
@@ -45,7 +44,6 @@ struct MyLessSillyCircuit1<F: Field> {
 // NOTE: It is necessary to allocate the witness variables that need to be committed before any other
 // variable is allocated. This can however be a limitation when a commitment to some indirect witnesses
 // (ones that are computed in the circuit) is needed.
-
 
 impl<ConstraintF: Field> ConstraintSynthesizer<ConstraintF> for MySillyCircuit<ConstraintF> {
     fn generate_constraints(
@@ -80,26 +78,20 @@ impl<ConstraintF: Field> ConstraintSynthesizer<ConstraintF> for MyLessSillyCircu
         // a * b
         let e_value = if self.a.is_some() && self.b.is_some() {
             Some(self.a.unwrap().mul(self.b.unwrap()))
-        } else {None};
-        let e =
-            cs.new_witness_variable(|| e_value.ok_or(SynthesisError::AssignmentMissing))?;
-        cs.enforce_constraint(
-            lc!() + a,
-            lc!() + b,
-            lc!() + e,
-        )?;
+        } else {
+            None
+        };
+        let e = cs.new_witness_variable(|| e_value.ok_or(SynthesisError::AssignmentMissing))?;
+        cs.enforce_constraint(lc!() + a, lc!() + b, lc!() + e)?;
 
         // c * d
         let f_value = if self.c.is_some() && self.d.is_some() {
             Some(self.c.unwrap().mul(self.d.unwrap()))
-        } else {None};
-        let f =
-            cs.new_witness_variable(|| f_value.ok_or(SynthesisError::AssignmentMissing))?;
-        cs.enforce_constraint(
-            lc!() + c,
-            lc!() + d,
-            lc!() + f,
-        )?;
+        } else {
+            None
+        };
+        let f = cs.new_witness_variable(|| f_value.ok_or(SynthesisError::AssignmentMissing))?;
+        cs.enforce_constraint(lc!() + c, lc!() + d, lc!() + f)?;
 
         let y = cs.new_input_variable(|| {
             let e = e_value.ok_or(SynthesisError::AssignmentMissing)?;
@@ -108,11 +100,7 @@ impl<ConstraintF: Field> ConstraintSynthesizer<ConstraintF> for MyLessSillyCircu
             Ok(e + f)
         })?;
 
-        cs.enforce_constraint(
-            lc!() + e + f,
-            lc!() + Variable::One,
-            lc!() + y,
-        )?;
+        cs.enforce_constraint(lc!() + e + f, lc!() + Variable::One, lc!() + y)?;
 
         Ok(())
     }
@@ -128,31 +116,19 @@ impl<ConstraintF: Field> ConstraintSynthesizer<ConstraintF> for MyLessSillyCircu
         let c = cs.new_witness_variable(|| self.c.ok_or(SynthesisError::AssignmentMissing))?;
         let d = cs.new_witness_variable(|| self.d.ok_or(SynthesisError::AssignmentMissing))?;
 
-        let e = cs.new_input_variable(|| {
-            Ok(self.a.unwrap().mul(self.b.unwrap()))
-        })?;
-        cs.enforce_constraint(
-            lc!() + a,
-            lc!() + b,
-            lc!() + e,
-        )?;
+        let e = cs.new_input_variable(|| Ok(self.a.unwrap().mul(self.b.unwrap())))?;
+        cs.enforce_constraint(lc!() + a, lc!() + b, lc!() + e)?;
 
-        let f = cs.new_input_variable(|| {
-            Ok(self.c.unwrap().mul(self.d.unwrap()))
-        })?;
-        cs.enforce_constraint(
-            lc!() + c,
-            lc!() + d,
-            lc!() + f,
-        )?;
+        let f = cs.new_input_variable(|| Ok(self.c.unwrap().mul(self.d.unwrap())))?;
+        cs.enforce_constraint(lc!() + c, lc!() + d, lc!() + f)?;
 
         Ok(())
     }
 }
 
 fn test_prove_and_verify<E>(n_iters: usize)
-    where
-        E: PairingEngine,
+where
+    E: PairingEngine,
 {
     let mut rng = StdRng::seed_from_u64(0u64);
 
@@ -163,7 +139,7 @@ fn test_prove_and_verify<E>(n_iters: usize)
         let commit_witness_count = 2;
 
         // Generators for committing to instance variables and witnesses and 1 more for randomness (`link_v` below)
-        let pedersen_bases = (0..num_instance_variables+commit_witness_count+1)
+        let pedersen_bases = (0..num_instance_variables + commit_witness_count + 1)
             .map(|_| E::G1Projective::rand(&mut rng).into_affine())
             .collect::<Vec<_>>();
 
@@ -175,7 +151,7 @@ fn test_prove_and_verify<E>(n_iters: usize)
             commit_witness_count,
             &mut rng,
         )
-            .unwrap();
+        .unwrap();
 
         let pvk = prepare_verifying_key::<E>(&params.vk);
 
@@ -197,24 +173,22 @@ fn test_prove_and_verify<E>(n_iters: usize)
             };
 
             // Create a LegoGro16 proof with our parameters.
-            let proof = create_random_proof_new(
-                circuit,
-                v,
-                link_v,
-                &params,
-                &mut rng,
-            )
-                .unwrap();
+            let proof = create_random_proof_new(circuit, v, link_v, &params, &mut rng).unwrap();
 
             assert!(verify_proof(&pvk, &proof).unwrap());
 
             assert!(verify_commitment_new(&params.vk, &proof, &[c], &[a, b], &v, &link_v).unwrap());
             assert!(!verify_commitment_new(&params.vk, &proof, &[c], &[a], &v, &link_v).unwrap());
-            assert!(!verify_commitment_new(&params.vk, &proof, &[a], &[a, b], &v, &link_v).unwrap());
+            assert!(
+                !verify_commitment_new(&params.vk, &proof, &[a], &[a, b], &v, &link_v).unwrap()
+            );
 
             assert_eq!(
                 get_commitment_to_witnesses(&params.vk, &proof, &[c]).unwrap(),
-                (pedersen_bases[2].mul(a.into_repr()) + pedersen_bases[3].mul(b.into_repr()) + pedersen_bases[4].mul(link_v.into_repr())).into_affine()
+                (pedersen_bases[2].mul(a.into_repr())
+                    + pedersen_bases[3].mul(b.into_repr())
+                    + pedersen_bases[4].mul(link_v.into_repr()))
+                .into_affine()
             );
         }
     }
@@ -224,7 +198,7 @@ fn test_prove_and_verify<E>(n_iters: usize)
         let commit_witness_count = 1;
 
         // Generators for committing to instance variables and witnesses and 1 more for randomness (`link_v` below)
-        let pedersen_bases = (0..num_instance_variables+commit_witness_count+1)
+        let pedersen_bases = (0..num_instance_variables + commit_witness_count + 1)
             .map(|_| E::G1Projective::rand(&mut rng).into_affine())
             .collect::<Vec<_>>();
 
@@ -236,7 +210,7 @@ fn test_prove_and_verify<E>(n_iters: usize)
             commit_witness_count,
             &mut rng,
         )
-            .unwrap();
+        .unwrap();
 
         let pvk = prepare_verifying_key::<E>(&params.vk);
 
@@ -258,33 +232,29 @@ fn test_prove_and_verify<E>(n_iters: usize)
             };
 
             // Create a LegoGro16 proof with our parameters.
-            let proof = create_random_proof_new(
-                circuit,
-                v,
-                link_v,
-                &params,
-                &mut rng,
-            )
-                .unwrap();
+            let proof = create_random_proof_new(circuit, v, link_v, &params, &mut rng).unwrap();
 
             assert!(verify_proof(&pvk, &proof).unwrap());
 
             // Verify opening to the commitments
             assert!(verify_commitment_new(&params.vk, &proof, &[c], &[a], &v, &link_v).unwrap());
-            assert!(!verify_commitment_new(&params.vk, &proof, &[c], &[a, b], &v, &link_v).unwrap());
+            assert!(
+                !verify_commitment_new(&params.vk, &proof, &[c], &[a, b], &v, &link_v).unwrap()
+            );
             assert!(!verify_commitment_new(&params.vk, &proof, &[b], &[a], &v, &link_v).unwrap());
 
             assert_eq!(
                 get_commitment_to_witnesses(&params.vk, &proof, &[c]).unwrap(),
-                (pedersen_bases[2].mul(a.into_repr()) + pedersen_bases[3].mul(link_v.into_repr())).into_affine()
+                (pedersen_bases[2].mul(a.into_repr()) + pedersen_bases[3].mul(link_v.into_repr()))
+                    .into_affine()
             );
         }
     }
 }
 
 fn test_prove_and_verify_1<E>(n_iters: usize)
-    where
-        E: PairingEngine,
+where
+    E: PairingEngine,
 {
     let mut rng = StdRng::seed_from_u64(0u64);
 
@@ -294,17 +264,22 @@ fn test_prove_and_verify_1<E>(n_iters: usize)
     let commit_witness_count = 4;
 
     // Generators for committing to instance variables and witnesses and 1 more for randomness (`link_v` below)
-    let pedersen_bases = (0..num_instance_variables+commit_witness_count+1)
+    let pedersen_bases = (0..num_instance_variables + commit_witness_count + 1)
         .map(|_| E::G1Projective::rand(&mut rng).into_affine())
         .collect::<Vec<_>>();
 
     let params = generate_random_parameters_new::<E, _, _>(
-        MyLessSillyCircuit { a: None, b: None, c: None, d: None },
+        MyLessSillyCircuit {
+            a: None,
+            b: None,
+            c: None,
+            d: None,
+        },
         &pedersen_bases,
         commit_witness_count,
         &mut rng,
     )
-        .unwrap();
+    .unwrap();
 
     let pvk = prepare_verifying_key::<E>(&params.vk);
 
@@ -336,32 +311,32 @@ fn test_prove_and_verify_1<E>(n_iters: usize)
             d: Some(d),
         };
 
-        let proof = create_random_proof_new(
-            circuit,
-            v,
-            link_v,
-            &params,
-            &mut rng,
-        )
-            .unwrap();
+        let proof = create_random_proof_new(circuit, v, link_v, &params, &mut rng).unwrap();
 
         assert!(verify_proof(&pvk, &proof).unwrap());
-        assert!(verify_commitment_new(&params.vk, &proof, &[y], &[a, b, c, d], &v, &link_v).unwrap());
-        assert!(!verify_commitment_new(&params.vk, &proof, &[a], &[a, b, c, d], &v, &link_v).unwrap());
+        assert!(
+            verify_commitment_new(&params.vk, &proof, &[y], &[a, b, c, d], &v, &link_v).unwrap()
+        );
+        assert!(
+            !verify_commitment_new(&params.vk, &proof, &[a], &[a, b, c, d], &v, &link_v).unwrap()
+        );
         assert!(!verify_commitment_new(&params.vk, &proof, &[y], &[a, b, c], &v, &link_v).unwrap());
 
         assert_eq!(
             get_commitment_to_witnesses(&params.vk, &proof, &[y]).unwrap(),
-            (
-                pedersen_bases[2].mul(a.into_repr()) + pedersen_bases[3].mul(b.into_repr()) + pedersen_bases[4].mul(c.into_repr()) + pedersen_bases[5].mul(d.into_repr()) + pedersen_bases[6].mul(link_v.into_repr())
-            ).into_affine()
+            (pedersen_bases[2].mul(a.into_repr())
+                + pedersen_bases[3].mul(b.into_repr())
+                + pedersen_bases[4].mul(c.into_repr())
+                + pedersen_bases[5].mul(d.into_repr())
+                + pedersen_bases[6].mul(link_v.into_repr()))
+            .into_affine()
         );
     }
 }
 
 fn test_prove_and_verify_2<E>(n_iters: usize)
-    where
-        E: PairingEngine,
+where
+    E: PairingEngine,
 {
     let mut rng = StdRng::seed_from_u64(0u64);
 
@@ -371,29 +346,34 @@ fn test_prove_and_verify_2<E>(n_iters: usize)
     let commit_witness_count = 4;
 
     // Generators for committing to instance variables and witnesses and 1 more for randomness (`link_v` below)
-    let pedersen_bases = (0..num_instance_variables+commit_witness_count+1)
+    let pedersen_bases = (0..num_instance_variables + commit_witness_count + 1)
         .map(|_| E::G1Projective::rand(&mut rng).into_affine())
         .collect::<Vec<_>>();
 
     let params = generate_random_parameters_new::<E, _, _>(
-        MyLessSillyCircuit1 { a: None, b: None, c: None, d: None },
+        MyLessSillyCircuit1 {
+            a: None,
+            b: None,
+            c: None,
+            d: None,
+        },
         &pedersen_bases,
         4,
         &mut rng,
     )
-        .unwrap();
+    .unwrap();
 
     let pvk = prepare_verifying_key::<E>(&params.vk);
 
     for _ in 0..n_iters {
-        // let a = E::Fr::rand(&mut rng);
-        // let b = E::Fr::rand(&mut rng);
-        // let c = E::Fr::rand(&mut rng);
-        // let d = E::Fr::rand(&mut rng);
-        let a = E::Fr::from(2 as u64);
-        let b = E::Fr::from(3 as u64);
-        let c = E::Fr::from(4 as u64);
-        let d = E::Fr::from(5 as u64);
+        let a = E::Fr::rand(&mut rng);
+        let b = E::Fr::rand(&mut rng);
+        let c = E::Fr::rand(&mut rng);
+        let d = E::Fr::rand(&mut rng);
+        // let a = E::Fr::from(2 as u64);
+        // let b = E::Fr::from(3 as u64);
+        // let c = E::Fr::from(4 as u64);
+        // let d = E::Fr::from(5 as u64);
 
         let mut e = a;
         e.mul_assign(&b);
@@ -413,25 +393,26 @@ fn test_prove_and_verify_2<E>(n_iters: usize)
             d: Some(d),
         };
 
-        let proof = create_random_proof_new(
-            circuit,
-            v,
-            link_v,
-            &params,
-            &mut rng,
-        )
-            .unwrap();
+        let proof = create_random_proof_new(circuit, v, link_v, &params, &mut rng).unwrap();
 
         assert!(verify_proof(&pvk, &proof).unwrap());
-        assert!(verify_commitment_new(&params.vk, &proof, &[e, f], &[a, b, c, d], &v, &link_v).unwrap());
-        assert!(!verify_commitment_new(&params.vk, &proof, &[a, b], &[a, b, c, d], &v, &link_v).unwrap());
+        assert!(
+            verify_commitment_new(&params.vk, &proof, &[e, f], &[a, b, c, d], &v, &link_v).unwrap()
+        );
+        assert!(
+            !verify_commitment_new(&params.vk, &proof, &[a, b], &[a, b, c, d], &v, &link_v)
+                .unwrap()
+        );
         assert!(!verify_commitment_new(&params.vk, &proof, &[e, f], &[a, b], &v, &link_v).unwrap());
 
         assert_eq!(
             get_commitment_to_witnesses(&params.vk, &proof, &[e, f]).unwrap(),
-            (
-                pedersen_bases[3].mul(a.into_repr()) + pedersen_bases[4].mul(b.into_repr()) + pedersen_bases[5].mul(c.into_repr()) + pedersen_bases[6].mul(d.into_repr()) + pedersen_bases[7].mul(link_v.into_repr())
-            ).into_affine()
+            (pedersen_bases[3].mul(a.into_repr())
+                + pedersen_bases[4].mul(b.into_repr())
+                + pedersen_bases[5].mul(c.into_repr())
+                + pedersen_bases[6].mul(d.into_repr())
+                + pedersen_bases[7].mul(link_v.into_repr()))
+            .into_affine()
         );
     }
 }
@@ -453,5 +434,26 @@ mod bls12_377 {
     #[test]
     fn prove_and_verify_new_2() {
         test_prove_and_verify_2::<Bls12_377>(10);
+    }
+}
+
+mod cp6_782 {
+    use super::*;
+
+    use ark_cp6_782::CP6_782;
+
+    #[test]
+    fn prove_and_verify() {
+        test_prove_and_verify::<CP6_782>(1);
+    }
+
+    #[test]
+    fn prove_and_verify_1() {
+        test_prove_and_verify_1::<CP6_782>(1);
+    }
+
+    #[test]
+    fn prove_and_verify_2() {
+        test_prove_and_verify_2::<CP6_782>(1);
     }
 }

@@ -6,9 +6,9 @@ use super::{PreparedVerifyingKey, Proof, VerifyingKey};
 
 use ark_relations::r1cs::{Result as R1CSResult, SynthesisError};
 
-use core::ops::{AddAssign, Neg};
 use ark_std::vec;
 use ark_std::vec::Vec;
+use core::ops::{AddAssign, Neg};
 
 /// Prepare the verifying key `vk` for use in proof verification.
 pub fn prepare_verifying_key<E: PairingEngine>(vk: &VerifyingKey<E>) -> PreparedVerifyingKey<E> {
@@ -71,7 +71,6 @@ pub fn verify_commitment<E: PairingEngine>(
     }
     g_ic.add_assign(&pvk.vk.eta_gamma_inv_g1.mul(v.into_repr()));
 
-    // Question: What is the point of this?
     let mut g_link = pvk.vk.link_bases[0].into_projective();
     for (i, b) in public_inputs.iter().zip(pvk.vk.link_bases.iter().skip(1)) {
         g_link.add_assign(&b.mul(i.into_repr()));

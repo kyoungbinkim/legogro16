@@ -8,12 +8,12 @@ pub use snark::*;
 
 #[cfg(test)]
 mod test {
-    use std::ops::Add;
     use super::{PESubspaceSnark, SparseMatrix, SubspaceSnark, PP};
     use ark_bls12_381::{Bls12_381, Fr, G1Affine, G1Projective, G2Affine, G2Projective};
     use ark_ec::{AffineCurve, ProjectiveCurve};
     use ark_ff::{One, PrimeField, UniformRand, Zero};
     use ark_std::rand::{rngs::StdRng, SeedableRng};
+    use std::ops::Add;
 
     #[test]
     fn test_basic() {
@@ -67,9 +67,11 @@ mod test {
         let w_bad: Vec<Fr> = vec![Fr::one(), Fr::one()];
 
         // y is a Pedersen-like commitment to `two` and `three` and bases `h1` and `h2`, i.e `y = h1 * two + h2 * three`
-        let y: Vec<G1Affine> = vec![
-            h1.into_projective().mul(two.into_repr()).add(h2.into_projective().mul(three.into_repr())).into_affine()
-        ];
+        let y: Vec<G1Affine> = vec![h1
+            .into_projective()
+            .mul(two.into_repr())
+            .add(h2.into_projective().mul(three.into_repr()))
+            .into_affine()];
 
         let (ek, vk) = PESubspaceSnark::<Bls12_381>::keygen(&mut rng, &pp, m);
 
@@ -135,29 +137,46 @@ mod test {
         let t = 4;
         let mut pp = PP::<G1Affine, G2Affine> { l, t, g1, g2 };
 
-        let bases1 = [G1Projective::rand(&mut rng), G1Projective::rand(&mut rng), G1Projective::rand(&mut rng)]
-            .iter()
-            .map(|p| p.into_affine())
-            .collect::<Vec<_>>();
-        let bases2 = [G1Projective::rand(&mut rng), G1Projective::rand(&mut rng), G1Projective::rand(&mut rng)]
-            .iter()
-            .map(|p| p.into_affine())
-            .collect::<Vec<_>>();
+        let bases1 = [
+            G1Projective::rand(&mut rng),
+            G1Projective::rand(&mut rng),
+            G1Projective::rand(&mut rng),
+        ]
+        .iter()
+        .map(|p| p.into_affine())
+        .collect::<Vec<_>>();
+        let bases2 = [
+            G1Projective::rand(&mut rng),
+            G1Projective::rand(&mut rng),
+            G1Projective::rand(&mut rng),
+        ]
+        .iter()
+        .map(|p| p.into_affine())
+        .collect::<Vec<_>>();
 
         let mut m = SparseMatrix::new(l, t);
         m.insert_row_slice(0, 0, &bases1);
         m.insert_row_slice(1, 0, &bases2[0..2]);
         m.insert_row_slice(1, 3, &bases2[2..]);
 
-        let w: Vec<Fr> = vec![Fr::rand(&mut rng), Fr::rand(&mut rng), Fr::rand(&mut rng), Fr::rand(&mut rng)];
+        let w: Vec<Fr> = vec![
+            Fr::rand(&mut rng),
+            Fr::rand(&mut rng),
+            Fr::rand(&mut rng),
+            Fr::rand(&mut rng),
+        ];
 
         let x: Vec<G1Affine> = vec![
-            bases1[0].into_projective().mul(w[0].into_repr()) + bases1[1].mul(w[1].into_repr()) + bases1[2].mul(w[2].into_repr()),
-            bases2[0].into_projective().mul(w[0].into_repr()) + bases2[1].mul(w[1].into_repr()) + bases2[2].mul(w[3].into_repr()),
+            bases1[0].into_projective().mul(w[0].into_repr())
+                + bases1[1].mul(w[1].into_repr())
+                + bases1[2].mul(w[2].into_repr()),
+            bases2[0].into_projective().mul(w[0].into_repr())
+                + bases2[1].mul(w[1].into_repr())
+                + bases2[2].mul(w[3].into_repr()),
         ]
-            .into_iter()
-            .map(|p| p.into_affine())
-            .collect::<Vec<_>>();
+        .into_iter()
+        .map(|p| p.into_affine())
+        .collect::<Vec<_>>();
 
         let (ek, vk) = PESubspaceSnark::<Bls12_381>::keygen(&mut rng, &pp, m);
 

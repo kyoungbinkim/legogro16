@@ -19,8 +19,8 @@ use std::time::{Duration, Instant};
 // Bring in some tools for using pairing-friendly curves
 // We're going to use the BLS12-377 pairing-friendly elliptic curve.
 use ark_bls12_377::{Bls12_377, Fr};
-use ark_ec::ProjectiveCurve;
-use ark_ff::Field;
+use ark_ec::{AffineCurve, ProjectiveCurve};
+use ark_ff::{Field, PrimeField};
 
 // We'll use these interfaces to construct our circuit.
 use ark_relations::{
@@ -197,7 +197,6 @@ fn test_mimc_groth16() {
 
         // proof_vec.truncate(0);
 
-        let start = Instant::now();
         {
             // Create an instance of our circuit (with the
             // witness)
@@ -210,21 +209,128 @@ fn test_mimc_groth16() {
             // Create commitment randomness
             let v = Fr::rand(&mut rng);
             let link_v = Fr::rand(&mut rng);
+
+            let start = Instant::now();
             // Create a LegoGro16 proof with our parameters.
             let proof = create_random_proof(c, v, link_v, &params, &mut rng).unwrap();
+            total_proving += start.elapsed();
+
+            let start = Instant::now();
             assert!(verify_proof(&pvk, &proof).unwrap());
+            total_verifying += start.elapsed();
+
             assert!(verify_commitment(&pvk, &proof, &[image], &v, &link_v).unwrap());
 
             // proof.write(&mut proof_vec).unwrap();
         }
+    }
+    let proving_avg = total_proving / SAMPLES;
+    let proving_avg =
+        proving_avg.subsec_nanos() as f64 / 1_000_000_000f64 + (proving_avg.as_secs() as f64);
 
-        total_proving += start.elapsed();
+    let verifying_avg = total_verifying / SAMPLES;
+    let verifying_avg =
+        verifying_avg.subsec_nanos() as f64 / 1_000_000_000f64 + (verifying_avg.as_secs() as f64);
 
-        let start = Instant::now();
-        // let proof = Proof::read(&proof_vec[..]).unwrap();
-        // Check the proof
+    println!("Average proving time: {:?} seconds", proving_avg);
+    println!("Average verifying time: {:?} seconds", verifying_avg);
+}
 
-        total_verifying += start.elapsed();
+#[test]
+fn test_mimc_groth16_new() {
+    // We're going to use the Groth16 proving system.
+    // This proof has a commitment to both left and right inputs
+
+    use legogro16::{
+        generator_new::generate_random_parameters_new,
+        prepare_verifying_key,
+        prover_new::create_random_proof_new,
+        verifier_new::{get_commitment_to_witnesses, verify_commitment_new},
+        verify_proof,
+    };
+
+    // This may not be cryptographically safe, use
+    // `OsRng` (for example) in production software.
+    let mut rng = StdRng::seed_from_u64(0u64);
+
+    // Generate the MiMC round constants
+    let constants = (0..MIMC_ROUNDS).map(|_| rng.gen()).collect::<Vec<_>>();
+
+    println!("Creating parameters...");
+
+    // Need 5 bases, 1 for public input, 2 for witnesses xl and xr, 1 for instance variable 1 and 1 for randomness (link_v)
+    let pedersen_bases = (0..5)
+        .map(|_| ark_bls12_377::G1Projective::rand(&mut rng).into_affine())
+        .collect::<Vec<_>>();
+
+    // Create parameters for our circuit
+    let params = {
+        let c = MiMCDemo::<Fr> {
+            xl: None,
+            xr: None,
+            constants: &constants,
+        };
+
+        generate_random_parameters_new::<Bls12_377, _, _>(c, &pedersen_bases, 2, &mut rng).unwrap()
+    };
+
+    // Prepare the verification key (for proof verification)
+    let pvk = prepare_verifying_key(&params.vk);
+
+    println!("Creating proofs...");
+
+    // Let's benchmark stuff!
+    const SAMPLES: u32 = 50;
+    let mut total_proving = Duration::new(0, 0);
+    let mut total_verifying = Duration::new(0, 0);
+
+    // Just a place to put the proof data, so we can
+    // benchmark deserialization.
+    // let mut proof_vec = vec![];
+
+    for _ in 0..SAMPLES {
+        // Generate a random preimage and compute the image
+        let xl = rng.gen();
+        let xr = rng.gen();
+        let image = mimc(xl, xr, &constants);
+
+        // proof_vec.truncate(0);
+
+        {
+            // Create an instance of our circuit (with the
+            // witness)
+            let c = MiMCDemo {
+                xl: Some(xl),
+                xr: Some(xr),
+                constants: &constants,
+            };
+
+            // Create commitment randomness
+            let v = Fr::rand(&mut rng);
+            let link_v = Fr::rand(&mut rng);
+
+            let start = Instant::now();
+            // Create a LegoGro16 proof with our parameters.
+            let proof = create_random_proof_new(c, v, link_v, &params, &mut rng).unwrap();
+            total_proving += start.elapsed();
+
+            let start = Instant::now();
+            assert!(verify_proof(&pvk, &proof).unwrap());
+            total_verifying += start.elapsed();
+
+            assert!(
+                verify_commitment_new(&params.vk, &proof, &[image], &[xl, xr], &v, &link_v)
+                    .unwrap()
+            );
+            assert_eq!(
+                get_commitment_to_witnesses(&params.vk, &proof, &[image]).unwrap(),
+                (pedersen_bases[2].mul(xl.into_repr())
+                    + pedersen_bases[3].mul(xr.into_repr())
+                    + pedersen_bases[4].mul(link_v.into_repr()))
+                .into_affine()
+            );
+            // proof.write(&mut proof_vec).unwrap();
+        }
     }
     let proving_avg = total_proving / SAMPLES;
     let proving_avg =

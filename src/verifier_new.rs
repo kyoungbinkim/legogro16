@@ -1,15 +1,16 @@
-use std::ops::AddAssign;
+use crate::{Proof, VerifyingKey};
 use ark_ec::{AffineCurve, PairingEngine, ProjectiveCurve};
 use ark_ff::PrimeField;
 use ark_relations::r1cs::SynthesisError;
-use crate::{Proof, VerifyingKey};
+use std::ops::AddAssign;
 
-/// Redact public inputs from the commitment in the proof such that commitment is only to the witnesses
+/// Redact public inputs from the commitment in the proof such that commitment opens only to the witnesses
 pub fn get_commitment_to_witnesses<E: PairingEngine>(
     vk: &VerifyingKey<E>,
     proof: &Proof<E>,
     public_inputs: &[E::Fr],
 ) -> Result<E::G1Affine, SynthesisError> {
+    // TODO: use MSM
     let mut g_link = vk.link_bases[0].into_projective();
     for (i, b) in public_inputs.iter().zip(vk.link_bases.iter().skip(1)) {
         g_link.add_assign(&b.mul(i.into_repr()));
@@ -27,15 +28,23 @@ pub fn verify_commitment_new<E: PairingEngine>(
     v: &E::Fr,
     link_v: &E::Fr,
 ) -> Result<bool, SynthesisError> {
-
+    // TODO: use MSM
     let mut g_ic = vk.gamma_abc_g1[0].into_projective();
-    for (i, b) in public_inputs.iter().chain(witnesses_expected_in_commitment.iter()).zip(vk.gamma_abc_g1.iter().skip(1)) {
+    for (i, b) in public_inputs
+        .iter()
+        .chain(witnesses_expected_in_commitment.iter())
+        .zip(vk.gamma_abc_g1.iter().skip(1))
+    {
         g_ic.add_assign(&b.mul(i.into_repr()));
     }
     g_ic.add_assign(&vk.eta_gamma_inv_g1.mul(v.into_repr()));
 
     let mut g_link = vk.link_bases[0].into_projective();
-    for (i, b) in public_inputs.iter().chain(witnesses_expected_in_commitment.iter()).zip(vk.link_bases.iter().skip(1)) {
+    for (i, b) in public_inputs
+        .iter()
+        .chain(witnesses_expected_in_commitment.iter())
+        .zip(vk.link_bases.iter().skip(1))
+    {
         g_link.add_assign(&b.mul(i.into_repr()));
     }
     g_link.add_assign(&vk.link_bases.last().unwrap().mul(link_v.into_repr()));

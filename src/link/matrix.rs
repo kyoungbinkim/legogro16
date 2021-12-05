@@ -2,10 +2,10 @@
 
 use ark_ec::{AffineCurve, PairingEngine, ProjectiveCurve};
 use ark_ff::Zero;
+use ark_std::marker::PhantomData;
 use ark_std::ops::{AddAssign, Mul};
 use ark_std::vec;
 use ark_std::vec::Vec;
-use ark_std::marker::PhantomData;
 
 /// CoeffPos: A struct to help build sparse matrices.
 #[derive(Clone, Debug)]
@@ -23,8 +23,8 @@ type Col<T> = Vec<CoeffPos<T>>;
 #[derive(Clone, Debug)]
 pub struct SparseMatrix<T> {
     cols: Vec<Col<T>>, // a vector of columns
-    pub nr: usize,  // no. of rows
-    pub nc: usize,  // no. of columns
+    pub nr: usize,     // no. of rows
+    pub nc: usize,     // no. of columns
 }
 
 impl<T: Copy> SparseMatrix<T> {

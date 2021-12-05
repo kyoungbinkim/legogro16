@@ -1,4 +1,8 @@
-use crate::{link::{PESubspaceSnark, SparseMatrix, SubspaceSnark, PP}, r1cs_to_qap::R1CStoQAP, Vec, VerifyingKey, ProvingKeyNew};
+use crate::{
+    link::{PESubspaceSnark, SparseMatrix, SubspaceSnark, PP},
+    r1cs_to_qap::R1CStoQAP,
+    ProvingKeyNew, Vec, VerifyingKey,
+};
 use ark_ec::{msm::FixedBaseMSM, AffineCurve, PairingEngine, ProjectiveCurve};
 use ark_ff::{Field, PrimeField, UniformRand, Zero};
 use ark_poly::{EvaluationDomain, GeneralEvaluationDomain};
@@ -21,10 +25,10 @@ pub fn generate_random_parameters_new<E, C, R>(
     commit_witness_count: usize,
     rng: &mut R,
 ) -> R1CSResult<ProvingKeyNew<E>>
-    where
-        E: PairingEngine,
-        C: ConstraintSynthesizer<E::Fr>,
-        R: Rng,
+where
+    E: PairingEngine,
+    C: ConstraintSynthesizer<E::Fr>,
+    R: Rng,
 {
     let alpha = E::Fr::rand(rng);
     let beta = E::Fr::rand(rng);
@@ -32,7 +36,17 @@ pub fn generate_random_parameters_new<E, C, R>(
     let delta = E::Fr::rand(rng);
     let eta = E::Fr::rand(rng);
 
-    generate_parameters_new::<E, C, R>(circuit, alpha, beta, gamma, delta, eta, pedersen_bases, commit_witness_count, rng)
+    generate_parameters_new::<E, C, R>(
+        circuit,
+        alpha,
+        beta,
+        gamma,
+        delta,
+        eta,
+        pedersen_bases,
+        commit_witness_count,
+        rng,
+    )
 }
 
 /// Create parameters for a circuit, given some toxic waste.
@@ -47,10 +61,10 @@ pub fn generate_parameters_new<E, C, R>(
     commit_witness_count: usize,
     rng: &mut R,
 ) -> R1CSResult<ProvingKeyNew<E>>
-    where
-        E: PairingEngine,
-        C: ConstraintSynthesizer<E::Fr>,
-        R: Rng,
+where
+    E: PairingEngine,
+    C: ConstraintSynthesizer<E::Fr>,
+    R: Rng,
 {
     type D<F> = GeneralEvaluationDomain<F>;
 
