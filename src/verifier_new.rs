@@ -2,7 +2,7 @@ use crate::{Proof, VerifyingKey};
 use ark_ec::{AffineCurve, PairingEngine, ProjectiveCurve};
 use ark_ff::PrimeField;
 use ark_relations::r1cs::SynthesisError;
-use std::ops::AddAssign;
+use ark_std::ops::AddAssign;
 
 /// Redact public inputs from the commitment in the proof such that commitment opens only to the witnesses
 pub fn get_commitment_to_witnesses<E: PairingEngine>(

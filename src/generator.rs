@@ -229,7 +229,7 @@ where
         g1: E::G1Affine::prime_subgroup_generator(),
         g2: E::G2Affine::prime_subgroup_generator(),
     };
-    println!("gamma_abc_g1 len={:?}", gamma_abc_g1.len());
+    // println!("gamma_abc_g1 len={:?}", gamma_abc_g1.len());
 
     let mut link_m = SparseMatrix::<E::G1Affine>::new(link_rows, link_cols);
     link_m.insert_row_slice(0, 0, &pedersen_bases);

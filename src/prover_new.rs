@@ -10,7 +10,7 @@ use ark_relations::r1cs::{
     ConstraintSynthesizer, ConstraintSystem, OptimizationGoal, Result as R1CSResult,
 };
 use ark_std::rand::Rng;
-use ark_std::{cfg_into_iter, cfg_iter, end_timer, start_timer, vec::Vec};
+use ark_std::{cfg_into_iter, cfg_iter, end_timer, start_timer, vec, vec::Vec};
 
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
