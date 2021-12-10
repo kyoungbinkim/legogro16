@@ -1,7 +1,8 @@
 //! Utils for matrix and vector operations
 
+use ark_ec::msm::VariableBaseMSM;
 use ark_ec::{AffineCurve, PairingEngine, ProjectiveCurve};
-use ark_ff::Zero;
+use ark_ff::{PrimeField, Zero};
 use ark_std::marker::PhantomData;
 use ark_std::ops::{AddAssign, Mul};
 use ark_std::vec;
@@ -96,12 +97,14 @@ impl<PE: PairingEngine> SparseLinAlgebra<PE> {
 /// MSM between a scalar vector and a G1 vector
 pub fn inner_product<PE: PairingEngine>(v: &[PE::Fr], w: &[PE::G1Affine]) -> PE::G1Affine {
     assert_eq!(v.len(), w.len());
-    let mut res: PE::G1Projective = PE::G1Projective::zero();
-    for i in 0..v.len() {
-        let tmp = w[i].mul(v[i]);
-        res.add_assign(&tmp);
-    }
-    res.into_affine()
+    let v = v.into_iter().map(|v| v.into_repr()).collect::<Vec<_>>();
+    VariableBaseMSM::multi_scalar_mul(w, &v).into_affine()
+    // let mut res: PE::G1Projective = PE::G1Projective::zero();
+    // for i in 0..v.len() {
+    //     let tmp = w[i].mul(v[i]);
+    //     res.add_assign(&tmp);
+    // }
+    // res.into_affine()
 }
 
 /// Scale given vector `v` by scalar `a`

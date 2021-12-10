@@ -36,6 +36,9 @@ where
     let delta = E::Fr::rand(rng);
     let eta = E::Fr::rand(rng);
 
+    let g1_generator = E::G1Projective::rand(rng);
+    let g2_generator = E::G2Projective::rand(rng);
+
     generate_parameters_new::<E, C, R>(
         circuit,
         alpha,
@@ -43,6 +46,8 @@ where
         gamma,
         delta,
         eta,
+        g1_generator,
+        g2_generator,
         pedersen_bases,
         commit_witness_count,
         rng,
@@ -57,6 +62,8 @@ pub fn generate_parameters_new<E, C, R>(
     gamma: E::Fr,
     delta: E::Fr,
     eta: E::Fr,
+    g1_generator: E::G1Projective,
+    g2_generator: E::G2Projective,
     pedersen_bases: &[E::G1Affine],
     commit_witness_count: usize,
     rng: &mut R,
@@ -143,9 +150,6 @@ where
         .collect::<Vec<_>>();
 
     drop(c);
-
-    let g1_generator = E::G1Projective::rand(rng);
-    let g2_generator = E::G2Projective::rand(rng);
 
     // Compute B window table
     let g2_time = start_timer!(|| "Compute G2 table");

@@ -20,23 +20,30 @@ pub fn prepare_verifying_key<E: PairingEngine>(vk: &VerifyingKey<E>) -> Prepared
     }
 }
 
+pub fn verify_link_proof<E: PairingEngine>(vk: &VerifyingKey<E>, proof: &Proof<E>) -> bool {
+    let commitments = vec![proof.link_d.into_projective(), proof.d.into_projective()];
+    PESubspaceSnark::<E>::verify(
+        &vk.link_pp,
+        &vk.link_vk,
+        &commitments
+            .iter()
+            .map(|p| p.into_affine())
+            .collect::<Vec<_>>(),
+        &proof.link_pi,
+    )
+}
+
 /// Verify a Groth16 proof `proof` against the prepared verification key `pvk`,
 /// with respect to the instance `public_inputs`.
 pub fn verify_proof<E: PairingEngine>(
     pvk: &PreparedVerifyingKey<E>,
     proof: &Proof<E>,
 ) -> R1CSResult<bool> {
-    let commitments = vec![proof.link_d.into_projective(), proof.d.into_projective()];
-    let link_verified = PESubspaceSnark::<E>::verify(
-        &pvk.vk.link_pp,
-        &pvk.vk.link_vk,
-        &commitments
-            .iter()
-            .map(|p| p.into_affine())// Use batch-to-affine
-            .collect::<Vec<_>>(),
-        &proof.link_pi,
-    );
-
+    // TODO: Return error indicating what failed rather than a boolean
+    let link_verified = verify_link_proof(&pvk.vk, proof);
+    if !link_verified {
+        return Ok(false);
+    }
     let qap = E::miller_loop(
         [
             (proof.a.into(), proof.b.into()),
@@ -48,7 +55,7 @@ pub fn verify_proof<E: PairingEngine>(
 
     let test = E::final_exponentiation(&qap).ok_or(SynthesisError::UnexpectedIdentity)?;
 
-    Ok(link_verified && test == pvk.alpha_g1_beta_g2)
+    Ok(test == pvk.alpha_g1_beta_g2)
 }
 
 pub fn verify_commitment<E: PairingEngine>(

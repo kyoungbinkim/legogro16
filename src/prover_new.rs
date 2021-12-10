@@ -80,6 +80,9 @@ where
 
     let s_repr = s.into_repr();
     let r_repr = r.into_repr();
+    let v_repr = v.into_repr();
+    let rs_repr = (r * s).into_repr();
+    let delta_g1_proj = pk.delta_g1.into_projective();
 
     // Compute C
     let prover = cs.borrow().unwrap();
@@ -92,8 +95,8 @@ where
 
     let l_aux_acc = VariableBaseMSM::multi_scalar_mul(&pk.l_query, uncommitted_witnesses);
 
-    let r_s_delta_g1 = pk.delta_g1.into_projective().mul(r_repr).mul(s_repr);
-    let v_eta_delta_inv = pk.eta_delta_inv_g1.into_projective().mul(v.into_repr());
+    let r_s_delta_g1 = delta_g1_proj.mul(rs_repr);
+    let v_eta_delta_inv = pk.eta_delta_inv_g1.into_projective().mul(v_repr);
 
     end_timer!(c_acc_time);
 
@@ -116,7 +119,7 @@ where
 
     // Compute A
     let a_acc_time = start_timer!(|| "Compute A");
-    let r_g1 = pk.delta_g1.mul(r);
+    let r_g1 = delta_g1_proj.mul(r_repr);
 
     let g_a = calculate_coeff(r_g1, &pk.a_query, pk.vk.alpha_g1, &assignment);
 
@@ -126,7 +129,7 @@ where
     // Compute B in G1 if needed
     let g1_b = if !r.is_zero() {
         let b_g1_acc_time = start_timer!(|| "Compute B in G1");
-        let s_g1 = pk.delta_g1.mul(s);
+        let s_g1 = delta_g1_proj.mul(s_repr);
         let g1_b = calculate_coeff(s_g1, &pk.b_g1_query, pk.beta_g1, &assignment);
 
         end_timer!(b_g1_acc_time);
@@ -138,7 +141,7 @@ where
 
     // Compute B in G2
     let b_g2_acc_time = start_timer!(|| "Compute B in G2");
-    let s_g2 = pk.vk.delta_g2.mul(s);
+    let s_g2 = pk.vk.delta_g2.into_projective().mul(s_repr);
     let g2_b = calculate_coeff(s_g2, &pk.b_g2_query, pk.vk.beta_g2, &assignment);
     let r_g1_b = g1_b.mul(r_repr);
     drop(assignment);
@@ -161,7 +164,7 @@ where
     let gamma_abc_inputs_acc =
         VariableBaseMSM::multi_scalar_mul(gamma_abc_inputs_source, &commit_assignments);
 
-    let v_eta_gamma_inv = pk.vk.eta_gamma_inv_g1.into_projective().mul(v.into_repr());
+    let v_eta_gamma_inv = pk.vk.eta_gamma_inv_g1.into_projective().mul(v_repr);
 
     let mut g_d = gamma_abc_inputs_acc;
     g_d += &v_eta_gamma_inv;

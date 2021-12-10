@@ -3,8 +3,9 @@
 //! and equality of committed values in multiple commitments
 
 use crate::link::matrix::*;
+use ark_ec::msm::FixedBaseMSM;
 use ark_ec::{AffineCurve, PairingEngine, ProjectiveCurve};
-use ark_ff::{bytes::ToBytes, One, UniformRand};
+use ark_ff::{bytes::ToBytes, One, PrimeField, UniformRand};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, SerializationError};
 use ark_std::io::{Read, Result as IoResult, Write};
 use ark_std::marker::PhantomData;
@@ -91,14 +92,17 @@ pub trait SubspaceSnark {
     fn verify(pp: &Self::PP, vk: &Self::VK, y: &[Self::OutVec], pi: &Self::Proof) -> bool;
 }
 
-fn vec_to_g2<PE: PairingEngine>(
-    pp: &PP<PE::G1Affine, PE::G2Affine>,
-    v: &Vec<PE::Fr>,
-) -> Vec<PE::G2Affine> {
-    // TODO: use MSM
-    v.iter()
-        .map(|x| pp.g2.mul(*x).into_affine())
-        .collect::<Vec<_>>()
+fn vec_to_affine<G: AffineCurve>(g: &G, v: &Vec<G::ScalarField>) -> Vec<G> {
+    let scalar_size = G::ScalarField::size_in_bits();
+    let window_size = FixedBaseMSM::get_mul_window_size(v.len());
+    let table = FixedBaseMSM::get_window_table(scalar_size, window_size, g.into_projective());
+    let mut muls = FixedBaseMSM::multi_scalar_mul(scalar_size, window_size, &table, v);
+    G::Projective::batch_normalization(&mut muls);
+    muls.into_iter().map(|v| v.into()).collect()
+
+    /*v.iter()
+    .map(|x| pp.g2.mul(*x).into_affine())
+    .collect::<Vec<_>>()*/
 }
 
 pub struct PESubspaceSnark<PE: PairingEngine> {
@@ -137,7 +141,7 @@ impl<PE: PairingEngine> SubspaceSnark for PESubspaceSnark<PE> {
         let c = scale_vector::<PE>(&a, &k);
         let ek = EK::<PE::G1Affine> { p };
         let vk = VK::<PE::G2Affine> {
-            c: vec_to_g2::<PE>(pp, &c),
+            c: vec_to_affine::<PE::G2Affine>(&pp.g2, &c),
             a: pp.g2.mul(a).into_affine(),
         };
         (ek, vk)
