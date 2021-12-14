@@ -30,21 +30,13 @@ pub mod verifier;
 
 pub mod link;
 
-/// Generate public parameters for the LegoGroth16 zkSNARK construction.
-pub mod generator_new;
-pub mod prover_new;
-pub mod verifier_new;
-
 /// Constraints for the Groth16 verifier.
 // Cannot yet create a LegoGroth16 gadget (for recursive proof) so commenting it out.
 // #[cfg(feature = "r1cs")]
 // pub mod constraints;
 
 #[cfg(test)]
-mod test;
-
-#[cfg(test)]
-mod test_new;
+mod tests;
 
 pub use self::data_structures::*;
 pub use self::{generator::*, prover::*, verifier::*};

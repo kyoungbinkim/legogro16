@@ -29,6 +29,7 @@ use ark_relations::{
 };
 
 use ark_std::rand::{rngs::StdRng, SeedableRng};
+use legogroth16::prover::verify_commitment;
 
 const MIMC_ROUNDS: usize = 322;
 
@@ -145,11 +146,13 @@ impl<'a, F: Field> ConstraintSynthesizer<F> for MiMCDemo<'a, F> {
 }
 
 #[test]
-fn test_mimc_groth16() {
-    // We're going to use the Groth16 proving system.
-    use legogro16::{
-        create_random_proof, generate_random_parameters, prepare_verifying_key, verify_commitment,
-        verify_proof,
+fn test_mimc_legogroth16() {
+    // We're going to use the LegoGroth16 proving system.
+    // This proof has a commitment to both left and right inputs
+
+    use legogroth16::{
+        create_random_proof, generate_random_parameters, get_commitment_to_witnesses,
+        prepare_verifying_key, verify_proof,
     };
 
     // This may not be cryptographically safe, use
@@ -161,6 +164,11 @@ fn test_mimc_groth16() {
 
     println!("Creating parameters...");
 
+    // Need 5 bases, 1 for public input, 2 for witnesses xl and xr, 1 for instance variable 1 and 1 for randomness (link_v)
+    let pedersen_bases = (0..5)
+        .map(|_| ark_bls12_377::G1Projective::rand(&mut rng).into_affine())
+        .collect::<Vec<_>>();
+
     // Create parameters for our circuit
     let params = {
         let c = MiMCDemo::<Fr> {
@@ -169,10 +177,8 @@ fn test_mimc_groth16() {
             constants: &constants,
         };
 
-        let pedersen_bases = (0..3)
-            .map(|_| ark_bls12_377::G1Projective::rand(&mut rng).into_affine())
-            .collect::<Vec<_>>();
-        generate_random_parameters::<Bls12_377, _, _>(c, &pedersen_bases, &mut rng).unwrap()
+        generate_random_parameters::<Bls12_377, _, _>(c, pedersen_bases.clone(), 2, &mut rng)
+            .unwrap()
     };
 
     // Prepare the verification key (for proof verification)
@@ -215,113 +221,14 @@ fn test_mimc_groth16() {
             let proof = create_random_proof(c, v, link_v, &params, &mut rng).unwrap();
             total_proving += start.elapsed();
 
-            let start = Instant::now();
-            assert!(verify_proof(&pvk, &proof).unwrap());
-            total_verifying += start.elapsed();
-
-            assert!(verify_commitment(&pvk, &proof, &[image], &v, &link_v).unwrap());
-
-            // proof.write(&mut proof_vec).unwrap();
-        }
-    }
-    let proving_avg = total_proving / SAMPLES;
-    let proving_avg =
-        proving_avg.subsec_nanos() as f64 / 1_000_000_000f64 + (proving_avg.as_secs() as f64);
-
-    let verifying_avg = total_verifying / SAMPLES;
-    let verifying_avg =
-        verifying_avg.subsec_nanos() as f64 / 1_000_000_000f64 + (verifying_avg.as_secs() as f64);
-
-    println!("Average proving time: {:?} seconds", proving_avg);
-    println!("Average verifying time: {:?} seconds", verifying_avg);
-}
-
-#[test]
-fn test_mimc_groth16_new() {
-    // We're going to use the Groth16 proving system.
-    // This proof has a commitment to both left and right inputs
-
-    use legogro16::{
-        generator_new::generate_random_parameters_new,
-        prepare_verifying_key,
-        prover_new::create_random_proof_new,
-        verifier_new::{get_commitment_to_witnesses, verify_commitment_new},
-        verify_proof,
-    };
-
-    // This may not be cryptographically safe, use
-    // `OsRng` (for example) in production software.
-    let mut rng = StdRng::seed_from_u64(0u64);
-
-    // Generate the MiMC round constants
-    let constants = (0..MIMC_ROUNDS).map(|_| rng.gen()).collect::<Vec<_>>();
-
-    println!("Creating parameters...");
-
-    // Need 5 bases, 1 for public input, 2 for witnesses xl and xr, 1 for instance variable 1 and 1 for randomness (link_v)
-    let pedersen_bases = (0..5)
-        .map(|_| ark_bls12_377::G1Projective::rand(&mut rng).into_affine())
-        .collect::<Vec<_>>();
-
-    // Create parameters for our circuit
-    let params = {
-        let c = MiMCDemo::<Fr> {
-            xl: None,
-            xr: None,
-            constants: &constants,
-        };
-
-        generate_random_parameters_new::<Bls12_377, _, _>(c, &pedersen_bases, 2, &mut rng).unwrap()
-    };
-
-    // Prepare the verification key (for proof verification)
-    let pvk = prepare_verifying_key(&params.vk);
-
-    println!("Creating proofs...");
-
-    // Let's benchmark stuff!
-    const SAMPLES: u32 = 50;
-    let mut total_proving = Duration::new(0, 0);
-    let mut total_verifying = Duration::new(0, 0);
-
-    // Just a place to put the proof data, so we can
-    // benchmark deserialization.
-    // let mut proof_vec = vec![];
-
-    for _ in 0..SAMPLES {
-        // Generate a random preimage and compute the image
-        let xl = rng.gen();
-        let xr = rng.gen();
-        let image = mimc(xl, xr, &constants);
-
-        // proof_vec.truncate(0);
-
-        {
-            // Create an instance of our circuit (with the
-            // witness)
-            let c = MiMCDemo {
-                xl: Some(xl),
-                xr: Some(xr),
-                constants: &constants,
-            };
-
-            // Create commitment randomness
-            let v = Fr::rand(&mut rng);
-            let link_v = Fr::rand(&mut rng);
-
-            let start = Instant::now();
-            // Create a LegoGro16 proof with our parameters.
-            let proof = create_random_proof_new(c, v, link_v, &params, &mut rng).unwrap();
-            total_proving += start.elapsed();
-
-            let start = Instant::now();
-            assert!(verify_proof(&pvk, &proof).unwrap());
-            total_verifying += start.elapsed();
-
             assert!(
-                verify_commitment_new(&params.vk, &proof, &[image], &[xl, xr], &v, &link_v)
-                    .unwrap()
+                verify_commitment(&params.vk, &proof, &[image], &[xl, xr], &v, &link_v).unwrap()
             );
+
+            let start = Instant::now();
+            assert!(verify_proof(&pvk, &proof).unwrap());
+            total_verifying += start.elapsed();
+
             assert_eq!(
                 get_commitment_to_witnesses(&params.vk, &proof, &[image]).unwrap(),
                 (pedersen_bases[2].mul(xl.into_repr())

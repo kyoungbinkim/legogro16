@@ -1,11 +1,11 @@
 //! zkSNARK for Linear Subspaces as defined in appendix D of the paper.
 //! Use to prove knowledge of openings of multiple Pedersen commitments. Can also prove knowledge
-//! and equality of committed values in multiple commitments
+//! and equality of committed values in multiple commitments. Note that this SNARK requires a trusted
+//! setup as the key generation creates a trapdoor.
 
 use crate::link::matrix::*;
-use ark_ec::msm::FixedBaseMSM;
 use ark_ec::{AffineCurve, PairingEngine, ProjectiveCurve};
-use ark_ff::{bytes::ToBytes, One, PrimeField, UniformRand};
+use ark_ff::{bytes::ToBytes, One, UniformRand};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, SerializationError};
 use ark_std::io::{Read, Result as IoResult, Write};
 use ark_std::marker::PhantomData;
@@ -14,6 +14,7 @@ use ark_std::rand::Rng;
 use ark_std::vec;
 use ark_std::vec::Vec;
 
+/// Public params
 #[derive(Clone, Default, PartialEq, Debug, CanonicalSerialize, CanonicalDeserialize)]
 pub struct PP<
     G1: Clone + ToBytes + Default + CanonicalSerialize + CanonicalDeserialize,
@@ -30,13 +31,8 @@ impl<
         G2: Clone + ToBytes + Default + CanonicalSerialize + CanonicalDeserialize,
     > PP<G1, G2>
 {
-    pub fn new(l: usize, t: usize, g1: &G1, g2: &G2) -> PP<G1, G2> {
-        PP {
-            l,
-            t,
-            g1: g1.clone(),
-            g2: g2.clone(),
-        }
+    pub fn new(l: usize, t: usize, g1: G1, g2: G2) -> PP<G1, G2> {
+        PP { l, t, g1, g2 }
     }
 }
 
@@ -92,19 +88,6 @@ pub trait SubspaceSnark {
     fn verify(pp: &Self::PP, vk: &Self::VK, y: &[Self::OutVec], pi: &Self::Proof) -> bool;
 }
 
-fn vec_to_affine<G: AffineCurve>(g: &G, v: &Vec<G::ScalarField>) -> Vec<G> {
-    let scalar_size = G::ScalarField::size_in_bits();
-    let window_size = FixedBaseMSM::get_mul_window_size(v.len());
-    let table = FixedBaseMSM::get_window_table(scalar_size, window_size, g.into_projective());
-    let mut muls = FixedBaseMSM::multi_scalar_mul(scalar_size, window_size, &table, v);
-    G::Projective::batch_normalization(&mut muls);
-    muls.into_iter().map(|v| v.into()).collect()
-
-    /*v.iter()
-    .map(|x| pp.g2.mul(*x).into_affine())
-    .collect::<Vec<_>>()*/
-}
-
 pub struct PESubspaceSnark<PE: PairingEngine> {
     pairing_engine_type: PhantomData<PE>,
 }
@@ -141,7 +124,7 @@ impl<PE: PairingEngine> SubspaceSnark for PESubspaceSnark<PE> {
         let c = scale_vector::<PE>(&a, &k);
         let ek = EK::<PE::G1Affine> { p };
         let vk = VK::<PE::G2Affine> {
-            c: vec_to_affine::<PE::G2Affine>(&pp.g2, &c),
+            c: multiples_of_g::<PE::G2Affine>(&pp.g2, &c),
             a: pp.g2.mul(a).into_affine(),
         };
         (ek, vk)

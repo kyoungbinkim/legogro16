@@ -1,6 +1,6 @@
 //! Utils for matrix and vector operations
 
-use ark_ec::msm::VariableBaseMSM;
+use ark_ec::msm::{FixedBaseMSM, VariableBaseMSM};
 use ark_ec::{AffineCurve, PairingEngine, ProjectiveCurve};
 use ark_ff::{PrimeField, Zero};
 use ark_std::marker::PhantomData;
@@ -99,12 +99,6 @@ pub fn inner_product<PE: PairingEngine>(v: &[PE::Fr], w: &[PE::G1Affine]) -> PE:
     assert_eq!(v.len(), w.len());
     let v = v.into_iter().map(|v| v.into_repr()).collect::<Vec<_>>();
     VariableBaseMSM::multi_scalar_mul(w, &v).into_affine()
-    // let mut res: PE::G1Projective = PE::G1Projective::zero();
-    // for i in 0..v.len() {
-    //     let tmp = w[i].mul(v[i]);
-    //     res.add_assign(&tmp);
-    // }
-    // res.into_affine()
 }
 
 /// Scale given vector `v` by scalar `a`
@@ -115,4 +109,14 @@ pub fn scale_vector<PE: PairingEngine>(a: &PE::Fr, v: &[PE::Fr]) -> Vec<PE::Fr> 
         res.push(x);
     }
     res
+}
+
+/// Given a group element `g` and vector `multiples` of scalars, returns a vector with elements `v_i * g`
+pub fn multiples_of_g<G: AffineCurve>(g: &G, multiples: &Vec<G::ScalarField>) -> Vec<G> {
+    let scalar_size = G::ScalarField::size_in_bits();
+    let window_size = FixedBaseMSM::get_mul_window_size(multiples.len());
+    let table = FixedBaseMSM::get_window_table(scalar_size, window_size, g.into_projective());
+    let mut muls = FixedBaseMSM::multi_scalar_mul(scalar_size, window_size, &table, multiples);
+    G::Projective::batch_normalization(&mut muls);
+    muls.into_iter().map(|v| v.into()).collect()
 }

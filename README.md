@@ -7,7 +7,14 @@
     <a href="https://deps.rs/repo/github/arkworks-rs/groth16"><img src="https://deps.rs/repo/github/arkworks-rs/groth16/status.svg"></a>
 </p>
 
-The arkworks ecosystem consist of Rust libraries for designing and working with __zero knowledge succinct non-interactive arguments (zkSNARKs)__. This repository contains an efficient implementation of the zkSNARK of [[Groth16]](https://eprint.iacr.org/2016/260).
+The arkworks ecosystem consist of Rust libraries for designing and working with __zero knowledge succinct non-interactive arguments (zkSNARKs)__. 
+This repository contains an implementation of the LegoGroth16, the [LegoSNARK](https://eprint.iacr.org/2019/142) variant of [Groth16](https://eprint.iacr.org/2016/260) zkSNARK proof system.  
+This project started as fork of [this](https://github.com/kobigurk/legogro16) but is updated to commit to a subset of the witnesses as well by specifying the
+count, say `n`, of the witnesses to commit during CRS generation. By convention, it commits to the first `n` variables allocated for witnesses in the circuit.   
+The proof contains 2 commitments, both to the instance and witness variables but with different commitment keys and randomness. 
+
+The zkSNARK for Linear Subspaces from appendix D is [here](src/link/snark.rs).
+
 
 This library is released under the MIT License and the Apache v2 License (see [License](#license)).
 
@@ -22,7 +29,7 @@ rustup install stable
 
 After that, use `cargo`, the standard Rust build tool, to build the library:
 ```bash
-git clone https://github.com/arkworks-rs/groth16.git
+git clone https://github.com/lovesh/legogroth16
 cargo build --release
 ```
 

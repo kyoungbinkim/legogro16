@@ -1,5 +1,3 @@
-#[macro_use]
-
 mod matrix;
 mod snark;
 

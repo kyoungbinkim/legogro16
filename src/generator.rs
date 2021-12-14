@@ -18,10 +18,14 @@ use rayon::prelude::*;
 
 /// Generates a random common reference string for
 /// a circuit.
+/// `pedersen_bases` are the bases (commitment key) for link (Pedersen) commitment to the first
+/// `commit_witness_count` witness variables allocated in the circuit. The commitment also commits
+/// to the public variables
 #[inline]
 pub fn generate_random_parameters<E, C, R>(
     circuit: C,
-    pedersen_bases: &[E::G1Affine],
+    pedersen_bases: Vec<E::G1Affine>,
+    commit_witness_count: usize,
     rng: &mut R,
 ) -> R1CSResult<ProvingKey<E>>
 where
@@ -35,7 +39,22 @@ where
     let delta = E::Fr::rand(rng);
     let eta = E::Fr::rand(rng);
 
-    generate_parameters::<E, C, R>(circuit, alpha, beta, gamma, delta, eta, pedersen_bases, rng)
+    let g1_generator = E::G1Projective::rand(rng);
+    let g2_generator = E::G2Projective::rand(rng);
+
+    generate_parameters::<E, C, R>(
+        circuit,
+        alpha,
+        beta,
+        gamma,
+        delta,
+        eta,
+        g1_generator,
+        g2_generator,
+        pedersen_bases,
+        commit_witness_count,
+        rng,
+    )
 }
 
 /// Create parameters for a circuit, given some toxic waste.
@@ -46,7 +65,10 @@ pub fn generate_parameters<E, C, R>(
     gamma: E::Fr,
     delta: E::Fr,
     eta: E::Fr,
-    pedersen_bases: &[E::G1Affine],
+    g1_generator: E::G1Projective,
+    g2_generator: E::G2Projective,
+    pedersen_bases: Vec<E::G1Affine>,
+    commit_witness_count: usize,
     rng: &mut R,
 ) -> R1CSResult<ProvingKey<E>>
 where
@@ -80,8 +102,13 @@ where
     end_timer!(domain_time);
     ///////////////////////////////////////////////////////////////////////////
 
-    let reduction_time = start_timer!(|| "R1CS to QAP Instance Map with Evaluation");
     let num_instance_variables = cs.num_instance_variables();
+    assert!(cs.num_witness_variables() >= commit_witness_count);
+
+    // The commitment will commit to all instance variables (public variables + 1), and `commit_witness_count` witness variables
+    let total_to_commit = num_instance_variables + commit_witness_count;
+
+    let reduction_time = start_timer!(|| "R1CS to QAP Instance Map with Evaluation");
     let (a, b, c, zt, qap_num_variables, m_raw) =
         R1CStoQAP::instance_map_with_evaluation::<E::Fr, D<E::Fr>>(cs, &t)?;
     end_timer!(reduction_time);
@@ -100,9 +127,9 @@ where
     let gamma_inverse = gamma.inverse().ok_or(SynthesisError::UnexpectedIdentity)?;
     let delta_inverse = delta.inverse().ok_or(SynthesisError::UnexpectedIdentity)?;
 
-    let gamma_abc = cfg_iter!(a[..num_instance_variables])
-        .zip(&b[..num_instance_variables])
-        .zip(&c[..num_instance_variables])
+    let gamma_abc = cfg_iter!(a[..total_to_commit])
+        .zip(&b[..total_to_commit])
+        .zip(&c[..total_to_commit])
         .map(|((a, b), c)| (beta * a + &(alpha * b) + c) * &gamma_inverse)
         .collect::<Vec<_>>();
 
@@ -127,9 +154,6 @@ where
         .collect::<Vec<_>>();
 
     drop(c);
-
-    let g1_generator = E::G1Projective::rand(rng);
-    let g2_generator = E::G2Projective::rand(rng);
 
     // Compute B window table
     let g2_time = start_timer!(|| "Compute G2 table");
@@ -198,7 +222,7 @@ where
         scalar_bits,
         g1_window,
         &g1_table,
-        &l[num_instance_variables..],
+        &l[total_to_commit..],
     );
     drop(l);
     end_timer!(l_time);
@@ -221,11 +245,13 @@ where
 
     let eta_gamma_inv_g1 = g1_generator.mul((eta * &gamma_inverse).into_repr());
 
-    let link_rows = 2; // we're comparing two commitments
+    // Setup public params for the Subspace Snark
+    let link_rows = 2; // we're comparing two commitments, proof.d and proof.link_d
     let link_cols = gamma_abc_g1.len() + 2; // we have len inputs and 1 hiding factor per row
     let link_pp = PP::<E::G1Affine, E::G2Affine> {
         l: link_rows,
         t: link_cols,
+        // TODO: These generators should be passed as argument.
         g1: E::G1Affine::prime_subgroup_generator(),
         g2: E::G2Affine::prime_subgroup_generator(),
     };
@@ -254,7 +280,7 @@ where
         eta_gamma_inv_g1: eta_gamma_inv_g1.into_affine(),
 
         link_pp,
-        link_bases: pedersen_bases.to_vec(),
+        link_bases: pedersen_bases,
         link_vk,
     };
 
@@ -279,7 +305,7 @@ where
         b_g2_query,
         h_query,
         l_query,
-
+        commit_witness_count,
         link_ek,
     })
 }

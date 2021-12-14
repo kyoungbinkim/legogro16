@@ -18,9 +18,9 @@ pub struct Proof<E: PairingEngine> {
     pub c: E::G1Affine,
     /// The `D` element in `G1`.
     pub d: E::G1Affine,
-
-    /// cp_{link} proof of commitment equality
+    /// cp_{link}
     pub link_d: E::G1Affine,
+    /// proof of commitment opening equality between `cp_{link}` and `d`
     pub link_pi: E::G1Affine,
 }
 
@@ -67,10 +67,11 @@ pub struct VerifyingKey<E: PairingEngine> {
     pub gamma_abc_g1: Vec<E::G1Affine>,
     /// The element `eta*gamma^-1 * G` in `E::G1`.
     pub eta_gamma_inv_g1: E::G1Affine,
-
-    /// cp_{link}
+    /// Public parameters of the Subspace Snark
     pub link_pp: PP<E::G1Affine, E::G2Affine>,
+    /// Commitment key of the link commitment cp_link
     pub link_bases: Vec<E::G1Affine>,
+    /// Verification key of the Subspace Snark
     pub link_vk: VK<E::G2Affine>,
 }
 
@@ -163,32 +164,6 @@ impl<E: PairingEngine> ToBytes for PreparedVerifyingKey<E> {
 /// The prover key for for the Groth16 zkSNARK.
 #[derive(Clone, Debug, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct ProvingKey<E: PairingEngine> {
-    /// The underlying verification key.
-    pub vk: VerifyingKey<E>,
-    /// The element `beta * G` in `E::G1`.
-    pub beta_g1: E::G1Affine,
-    /// The element `delta * G` in `E::G1`.
-    pub delta_g1: E::G1Affine,
-    /// The element `eta*delta^-1 * G` in `E::G1`.
-    pub eta_delta_inv_g1: E::G1Affine,
-    /// The elements `a_i * G` in `E::G1`.
-    pub a_query: Vec<E::G1Affine>,
-    /// The elements `b_i * G` in `E::G1`.
-    pub b_g1_query: Vec<E::G1Affine>,
-    /// The elements `b_i * H` in `E::G2`.
-    pub b_g2_query: Vec<E::G2Affine>,
-    /// The elements `h_i * G` in `E::G1`.
-    pub h_query: Vec<E::G1Affine>,
-    /// The elements `l_i * G` in `E::G1`.
-    pub l_query: Vec<E::G1Affine>,
-
-    /// Evaluation key of cp_{link}
-    pub link_ek: EK<E::G1Affine>,
-}
-
-/// The prover key for for the Groth16 zkSNARK.
-#[derive(Clone, Debug, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
-pub struct ProvingKeyNew<E: PairingEngine> {
     /// The underlying verification key.
     pub vk: VerifyingKey<E>,
     /// The element `beta * G` in `E::G1`.

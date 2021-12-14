@@ -1,14 +1,12 @@
-use crate::{
-    generator_new::generate_random_parameters_new, prepare_verifying_key,
-    prover_new::create_random_proof_new, verifier_new::verify_commitment_new, verify_proof,
-};
+use crate::{create_random_proof, generate_random_parameters, prepare_verifying_key, verify_proof};
 use ark_ec::{AffineCurve, PairingEngine, ProjectiveCurve};
 use ark_ff::{PrimeField, UniformRand};
 use ark_std::rand::{rngs::StdRng, SeedableRng};
 
 use core::ops::MulAssign;
 
-use crate::verifier_new::get_commitment_to_witnesses;
+use crate::prover::verify_commitment;
+use crate::verifier::get_commitment_to_witnesses;
 use ark_ff::Field;
 use ark_relations::r1cs::Variable;
 use ark_relations::{
@@ -145,9 +143,9 @@ where
 
         let circuit = MySillyCircuit { a: None, b: None };
 
-        let params = generate_random_parameters_new::<E, _, _>(
+        let params = generate_random_parameters::<E, _, _>(
             circuit,
-            &pedersen_bases,
+            pedersen_bases.clone(),
             commit_witness_count,
             &mut rng,
         )
@@ -173,15 +171,14 @@ where
             };
 
             // Create a LegoGro16 proof with our parameters.
-            let proof = create_random_proof_new(circuit, v, link_v, &params, &mut rng).unwrap();
+            let proof = create_random_proof(circuit, v, link_v, &params, &mut rng).unwrap();
+
+            // Prover verifies the openings of the commitments
+            assert!(verify_commitment(&params.vk, &proof, &[c], &[a, b], &v, &link_v).unwrap());
+            assert!(!verify_commitment(&params.vk, &proof, &[c], &[a], &v, &link_v).unwrap());
+            assert!(!verify_commitment(&params.vk, &proof, &[a], &[a, b], &v, &link_v).unwrap());
 
             assert!(verify_proof(&pvk, &proof).unwrap());
-
-            assert!(verify_commitment_new(&params.vk, &proof, &[c], &[a, b], &v, &link_v).unwrap());
-            assert!(!verify_commitment_new(&params.vk, &proof, &[c], &[a], &v, &link_v).unwrap());
-            assert!(
-                !verify_commitment_new(&params.vk, &proof, &[a], &[a, b], &v, &link_v).unwrap()
-            );
 
             assert_eq!(
                 get_commitment_to_witnesses(&params.vk, &proof, &[c]).unwrap(),
@@ -204,9 +201,9 @@ where
 
         let circuit = MySillyCircuit { a: None, b: None };
 
-        let params = generate_random_parameters_new::<E, _, _>(
+        let params = generate_random_parameters::<E, _, _>(
             circuit,
-            &pedersen_bases,
+            pedersen_bases.clone(),
             commit_witness_count,
             &mut rng,
         )
@@ -232,16 +229,14 @@ where
             };
 
             // Create a LegoGro16 proof with our parameters.
-            let proof = create_random_proof_new(circuit, v, link_v, &params, &mut rng).unwrap();
+            let proof = create_random_proof(circuit, v, link_v, &params, &mut rng).unwrap();
+
+            // Prover verifies the openings of the commitments
+            assert!(verify_commitment(&params.vk, &proof, &[c], &[a], &v, &link_v).unwrap());
+            assert!(!verify_commitment(&params.vk, &proof, &[c], &[a, b], &v, &link_v).unwrap());
+            assert!(!verify_commitment(&params.vk, &proof, &[b], &[a], &v, &link_v).unwrap());
 
             assert!(verify_proof(&pvk, &proof).unwrap());
-
-            // Verify opening to the commitments
-            assert!(verify_commitment_new(&params.vk, &proof, &[c], &[a], &v, &link_v).unwrap());
-            assert!(
-                !verify_commitment_new(&params.vk, &proof, &[c], &[a, b], &v, &link_v).unwrap()
-            );
-            assert!(!verify_commitment_new(&params.vk, &proof, &[b], &[a], &v, &link_v).unwrap());
 
             assert_eq!(
                 get_commitment_to_witnesses(&params.vk, &proof, &[c]).unwrap(),
@@ -268,14 +263,14 @@ where
         .map(|_| E::G1Projective::rand(&mut rng).into_affine())
         .collect::<Vec<_>>();
 
-    let params = generate_random_parameters_new::<E, _, _>(
+    let params = generate_random_parameters::<E, _, _>(
         MyLessSillyCircuit {
             a: None,
             b: None,
             c: None,
             d: None,
         },
-        &pedersen_bases,
+        pedersen_bases.clone(),
         commit_witness_count,
         &mut rng,
     )
@@ -311,16 +306,13 @@ where
             d: Some(d),
         };
 
-        let proof = create_random_proof_new(circuit, v, link_v, &params, &mut rng).unwrap();
+        let proof = create_random_proof(circuit, v, link_v, &params, &mut rng).unwrap();
+        // Prover verifies the openings of the commitments
+        assert!(verify_commitment(&params.vk, &proof, &[y], &[a, b, c, d], &v, &link_v).unwrap());
+        assert!(!verify_commitment(&params.vk, &proof, &[a], &[a, b, c, d], &v, &link_v).unwrap());
+        assert!(!verify_commitment(&params.vk, &proof, &[y], &[a, b, c], &v, &link_v).unwrap());
 
         assert!(verify_proof(&pvk, &proof).unwrap());
-        assert!(
-            verify_commitment_new(&params.vk, &proof, &[y], &[a, b, c, d], &v, &link_v).unwrap()
-        );
-        assert!(
-            !verify_commitment_new(&params.vk, &proof, &[a], &[a, b, c, d], &v, &link_v).unwrap()
-        );
-        assert!(!verify_commitment_new(&params.vk, &proof, &[y], &[a, b, c], &v, &link_v).unwrap());
 
         assert_eq!(
             get_commitment_to_witnesses(&params.vk, &proof, &[y]).unwrap(),
@@ -350,14 +342,14 @@ where
         .map(|_| E::G1Projective::rand(&mut rng).into_affine())
         .collect::<Vec<_>>();
 
-    let params = generate_random_parameters_new::<E, _, _>(
+    let params = generate_random_parameters::<E, _, _>(
         MyLessSillyCircuit1 {
             a: None,
             b: None,
             c: None,
             d: None,
         },
-        &pedersen_bases,
+        pedersen_bases.clone(),
         4,
         &mut rng,
     )
@@ -393,17 +385,17 @@ where
             d: Some(d),
         };
 
-        let proof = create_random_proof_new(circuit, v, link_v, &params, &mut rng).unwrap();
+        let proof = create_random_proof(circuit, v, link_v, &params, &mut rng).unwrap();
+        // Prover verifies the openings of the commitments
+        assert!(
+            verify_commitment(&params.vk, &proof, &[e, f], &[a, b, c, d], &v, &link_v).unwrap()
+        );
+        assert!(
+            !verify_commitment(&params.vk, &proof, &[a, b], &[a, b, c, d], &v, &link_v).unwrap()
+        );
+        assert!(!verify_commitment(&params.vk, &proof, &[e, f], &[a, b], &v, &link_v).unwrap());
 
         assert!(verify_proof(&pvk, &proof).unwrap());
-        assert!(
-            verify_commitment_new(&params.vk, &proof, &[e, f], &[a, b, c, d], &v, &link_v).unwrap()
-        );
-        assert!(
-            !verify_commitment_new(&params.vk, &proof, &[a, b], &[a, b, c, d], &v, &link_v)
-                .unwrap()
-        );
-        assert!(!verify_commitment_new(&params.vk, &proof, &[e, f], &[a, b], &v, &link_v).unwrap());
 
         assert_eq!(
             get_commitment_to_witnesses(&params.vk, &proof, &[e, f]).unwrap(),
@@ -422,17 +414,17 @@ mod bls12_377 {
     use ark_bls12_377::Bls12_377;
 
     #[test]
-    fn prove_and_verify_new() {
+    fn prove_and_verify() {
         test_prove_and_verify::<Bls12_377>(10);
     }
 
     #[test]
-    fn prove_and_verify_new_1() {
+    fn prove_and_verify_1() {
         test_prove_and_verify_1::<Bls12_377>(10);
     }
 
     #[test]
-    fn prove_and_verify_new_2() {
+    fn prove_and_verify_2() {
         test_prove_and_verify_2::<Bls12_377>(10);
     }
 }
