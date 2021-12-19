@@ -21,6 +21,24 @@ pub fn prepare_verifying_key<E: PairingEngine>(vk: &VerifyingKey<E>) -> Prepared
     }
 }
 
+/// Prepare proof inputs for use with [`verify_proof_with_prepared_inputs`], wrt the prepared
+/// verification key `pvk` and instance public inputs.
+pub fn prepare_inputs<E: PairingEngine>(
+    pvk: &PreparedVerifyingKey<E>,
+    public_inputs: &[E::Fr],
+) -> R1CSResult<E::G1Projective> {
+    // if (public_inputs.len() + 1) != pvk.vk.gamma_abc_g1.len() {
+    //     return Err(SynthesisError::MalformedVerifyingKey);
+    // }
+
+    let mut g_ic = pvk.vk.gamma_abc_g1[0].into_projective();
+    for (i, b) in public_inputs.iter().zip(pvk.vk.gamma_abc_g1.iter().skip(1)) {
+        g_ic.add_assign(&b.mul(i.into_repr()));
+    }
+
+    Ok(g_ic)
+}
+
 /// Verify the proof of the Subspace Snark on the equality of openings of cp_link and proof.d
 pub fn verify_link_proof<E: PairingEngine>(vk: &VerifyingKey<E>, proof: &Proof<E>) -> bool {
     let commitments = vec![proof.link_d.into_projective(), proof.d.into_projective()];
@@ -39,17 +57,23 @@ pub fn verify_link_proof<E: PairingEngine>(vk: &VerifyingKey<E>, proof: &Proof<E
 pub fn verify_proof<E: PairingEngine>(
     pvk: &PreparedVerifyingKey<E>,
     proof: &Proof<E>,
+    public_inputs: Option<&[E::Fr]>,
 ) -> R1CSResult<bool> {
     // TODO: Return error indicating what failed rather than a boolean
     let link_verified = verify_link_proof(&pvk.vk, proof);
     if !link_verified {
         return Ok(false);
     }
+    let mut d = proof.d.into_projective();
+    if let Some(inputs) = public_inputs {
+        d.add_assign(prepare_inputs(pvk, inputs)?);
+    }
+
     let qap = E::miller_loop(
         [
             (proof.a.into(), proof.b.into()),
             (proof.c.into(), pvk.delta_g2_neg_pc.clone()),
-            (proof.d.into(), pvk.gamma_g2_neg_pc.clone()),
+            (d.into_affine().into(), pvk.gamma_g2_neg_pc.clone()),
         ]
         .iter(),
     );

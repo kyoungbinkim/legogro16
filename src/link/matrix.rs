@@ -96,7 +96,8 @@ impl<PE: PairingEngine> SparseLinAlgebra<PE> {
 
 /// MSM between a scalar vector and a G1 vector
 pub fn inner_product<PE: PairingEngine>(v: &[PE::Fr], w: &[PE::G1Affine]) -> PE::G1Affine {
-    assert_eq!(v.len(), w.len());
+    // assert_eq!(v.len(), w.len());
+    assert!(v.len() <= w.len());
     let v = v.into_iter().map(|v| v.into_repr()).collect::<Vec<_>>();
     VariableBaseMSM::multi_scalar_mul(w, &v).into_affine()
 }

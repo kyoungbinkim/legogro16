@@ -24,6 +24,7 @@ pub fn create_random_proof<E, C, R>(
     v: E::Fr,
     link_v: E::Fr,
     pk: &ProvingKey<E>,
+    commit_to_instance: bool,
     rng: &mut R,
 ) -> R1CSResult<Proof<E>>
 where
@@ -34,7 +35,7 @@ where
     let r = E::Fr::rand(rng);
     let s = E::Fr::rand(rng);
 
-    create_proof::<E, C>(circuit, pk, r, s, v, link_v)
+    create_proof::<E, C>(circuit, pk, r, s, v, link_v, commit_to_instance)
 }
 
 /// Create a Groth16 proof using randomness `r` and `s`.
@@ -47,6 +48,7 @@ pub fn create_proof<E, C>(
     s: E::Fr,
     v: E::Fr,
     link_v: E::Fr,
+    commit_to_instance: bool,
 ) -> R1CSResult<Proof<E>>
 where
     E: PairingEngine,
@@ -106,7 +108,11 @@ where
         .map(|s| s.into_repr())
         .collect::<Vec<_>>();
 
-    let mut commit_assignments = input_assignment_wth_one.clone();
+    // let mut commit_assignments = input_assignment_wth_one.clone();
+    let mut commit_assignments = vec![];
+    if commit_to_instance {
+        commit_assignments.extend_from_slice(&input_assignment_wth_one);
+    }
     commit_assignments.extend_from_slice(committed_witnesses);
 
     drop(prover);
@@ -160,7 +166,11 @@ where
     // Compute D
     let d_acc_time = start_timer!(|| "Compute D");
 
-    let gamma_abc_inputs_source = &pk.vk.gamma_abc_g1;
+    let gamma_abc_inputs_source = if commit_to_instance {
+        &pk.vk.gamma_abc_g1[..]
+    } else {
+        &pk.vk.gamma_abc_g1[input_assignment_wth_one.len()..]
+    };
     let gamma_abc_inputs_acc =
         VariableBaseMSM::multi_scalar_mul(gamma_abc_inputs_source, &commit_assignments);
 
@@ -170,7 +180,11 @@ where
     g_d += &v_eta_gamma_inv;
     end_timer!(d_acc_time);
 
-    let mut commit_assignments_with_link_hider = vec![];
+    let mut commit_assignments_with_link_hider = if commit_to_instance {
+        vec![]
+    } else {
+        vec![<E::Fr as PrimeField>::BigInt::from(0); input_assignment_wth_one.len()]
+    };
     commit_assignments_with_link_hider.append(&mut commit_assignments);
     commit_assignments_with_link_hider.push(link_v.into_repr());
 

@@ -218,7 +218,7 @@ fn test_mimc_legogroth16() {
 
             let start = Instant::now();
             // Create a LegoGro16 proof with our parameters.
-            let proof = create_random_proof(c, v, link_v, &params, &mut rng).unwrap();
+            let proof = create_random_proof(c, v, link_v, &params, true, &mut rng).unwrap();
             total_proving += start.elapsed();
 
             assert!(
@@ -226,7 +226,7 @@ fn test_mimc_legogroth16() {
             );
 
             let start = Instant::now();
-            assert!(verify_proof(&pvk, &proof).unwrap());
+            assert!(verify_proof(&pvk, &proof, None).unwrap());
             total_verifying += start.elapsed();
 
             assert_eq!(
