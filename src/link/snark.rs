@@ -3,7 +3,8 @@
 //! and equality of committed values in multiple commitments. Note that this SNARK requires a trusted
 //! setup as the key generation creates a trapdoor.
 
-use crate::link::matrix::*;
+use crate::link::error::LinkError;
+use crate::link::utils::*;
 use ark_ec::{AffineCurve, PairingEngine, ProjectiveCurve};
 use ark_ff::{bytes::ToBytes, One, UniformRand};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, SerializationError};
@@ -83,9 +84,18 @@ pub trait SubspaceSnark {
 
     type Proof;
 
-    fn keygen<R: Rng>(rng: &mut R, pp: &Self::PP, m: Self::KMtx) -> (Self::EK, Self::VK);
-    fn prove(pp: &Self::PP, ek: &Self::EK, x: &[Self::InVec]) -> Self::Proof;
-    fn verify(pp: &Self::PP, vk: &Self::VK, y: &[Self::OutVec], pi: &Self::Proof) -> bool;
+    fn keygen<R: Rng>(
+        rng: &mut R,
+        pp: &Self::PP,
+        m: &Self::KMtx,
+    ) -> Result<(Self::EK, Self::VK), LinkError>;
+    fn prove(pp: &Self::PP, ek: &Self::EK, w: &[Self::InVec]) -> Result<Self::Proof, LinkError>;
+    fn verify(
+        pp: &Self::PP,
+        vk: &Self::VK,
+        y: &[Self::OutVec],
+        pi: &Self::Proof,
+    ) -> Result<(), LinkError>;
 }
 
 pub struct PESubspaceSnark<PE: PairingEngine> {
@@ -110,7 +120,11 @@ impl<PE: PairingEngine> SubspaceSnark for PESubspaceSnark<PE> {
     /// h1, 0, 0, 0
     /// 0, h2, 0, 0
     /// 0, h3, h4, 0
-    fn keygen<R: Rng>(rng: &mut R, pp: &Self::PP, m: Self::KMtx) -> (Self::EK, Self::VK) {
+    fn keygen<R: Rng>(
+        rng: &mut R,
+        pp: &Self::PP,
+        m: &Self::KMtx,
+    ) -> Result<(Self::EK, Self::VK), LinkError> {
         // `k` is the trapdoor
         let mut k: Vec<PE::Fr> = Vec::with_capacity(pp.l);
         for _ in 0..pp.l {
@@ -119,7 +133,7 @@ impl<PE: PairingEngine> SubspaceSnark for PESubspaceSnark<PE> {
 
         let a = PE::Fr::rand(rng);
 
-        let p = SparseLinAlgebra::<PE>::sparse_vector_matrix_mult(&k, &m);
+        let p = SparseLinAlgebra::<PE>::sparse_vector_matrix_mult(&k, m)?;
 
         let c = scale_vector::<PE>(&a, &k);
         let ek = EK::<PE::G1Affine> { p };
@@ -127,23 +141,37 @@ impl<PE: PairingEngine> SubspaceSnark for PESubspaceSnark<PE> {
             c: multiples_of_g::<PE::G2Affine>(&pp.g2, &c),
             a: pp.g2.mul(a).into_affine(),
         };
-        (ek, vk)
+        Ok((ek, vk))
     }
 
-    fn prove(pp: &Self::PP, ek: &Self::EK, w: &[Self::InVec]) -> Self::Proof {
-        // assert_eq!(pp.t, w.len());
-        assert!(pp.t >= w.len());
-        inner_product::<PE>(w, &ek.p)
+    fn prove(pp: &Self::PP, ek: &Self::EK, w: &[Self::InVec]) -> Result<Self::Proof, LinkError> {
+        if pp.t < w.len() {
+            return Err(LinkError::VectorLongerThanExpected(w.len(), pp.t));
+        }
+        Ok(inner_product::<PE>(w, &ek.p))
     }
 
-    fn verify(pp: &Self::PP, vk: &Self::VK, x: &[Self::OutVec], pi: &Self::Proof) -> bool {
-        assert_eq!(pp.l, x.len());
+    fn verify(
+        pp: &Self::PP,
+        vk: &Self::VK,
+        x: &[Self::OutVec],
+        pi: &Self::Proof,
+    ) -> Result<(), LinkError> {
+        if pp.l != x.len() {
+            return Err(LinkError::VectorWithUnexpectedLength(x.len(), pp.l));
+        }
+        if vk.c.len() < x.len() {
+            return Err(LinkError::VectorLongerThanExpected(x.len(), vk.c.len()));
+        }
 
         let mut pairs = vec![];
         for i in 0..x.len() {
             pairs.push((PE::G1Prepared::from(x[i]), PE::G2Prepared::from(vk.c[i])));
         }
         pairs.push((PE::G1Prepared::from(*pi), PE::G2Prepared::from(vk.a.neg())));
-        PE::Fqk::one() == PE::product_of_pairings(pairs.iter())
+        if PE::Fqk::one() != PE::product_of_pairings(pairs.iter()) {
+            return Err(LinkError::InvalidProof);
+        }
+        Ok(())
     }
 }

@@ -30,15 +30,17 @@ pub mod verifier;
 
 pub mod link;
 
+pub mod error;
+
 /// Constraints for the Groth16 verifier.
 // Cannot yet create a LegoGroth16 gadget (for recursive proof) so commenting it out.
 // #[cfg(feature = "r1cs")]
 // pub mod constraints;
 
-#[cfg(test)]
-mod tests;
+pub type Result<T> = core::result::Result<T, error::Error>;
 
-pub use self::data_structures::*;
-pub use self::{generator::*, prover::*, verifier::*};
-
+pub use self::{data_structures::*, generator::*, prover::*, r1cs_to_qap::*, verifier::*};
 use ark_std::vec::Vec;
+
+#[cfg(test)]
+pub mod tests;

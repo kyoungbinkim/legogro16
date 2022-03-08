@@ -187,3 +187,11 @@ pub struct ProvingKey<E: PairingEngine> {
     /// Evaluation key of cp_{link}
     pub link_ek: EK<E::G1Affine>,
 }
+
+/// Public parameters for CP link
+#[derive(Clone, Debug, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
+pub struct LinkPublicGenerators<E: PairingEngine> {
+    pub pedersen_gens: Vec<E::G1Affine>,
+    pub g1: E::G1Affine,
+    pub g2: E::G2Affine,
+}

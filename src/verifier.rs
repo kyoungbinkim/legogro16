@@ -4,8 +4,9 @@ use ark_ff::PrimeField;
 
 use super::{PreparedVerifyingKey, Proof, VerifyingKey};
 
-use ark_relations::r1cs::{Result as R1CSResult, SynthesisError};
+use ark_relations::r1cs::SynthesisError;
 
+use crate::error::Error;
 use ark_ec::msm::VariableBaseMSM;
 use ark_std::vec;
 use ark_std::vec::Vec;
@@ -26,10 +27,10 @@ pub fn prepare_verifying_key<E: PairingEngine>(vk: &VerifyingKey<E>) -> Prepared
 pub fn prepare_inputs<E: PairingEngine>(
     pvk: &PreparedVerifyingKey<E>,
     public_inputs: &[E::Fr],
-) -> R1CSResult<E::G1Projective> {
-    // if (public_inputs.len() + 1) != pvk.vk.gamma_abc_g1.len() {
-    //     return Err(SynthesisError::MalformedVerifyingKey);
-    // }
+) -> crate::Result<E::G1Projective> {
+    if (public_inputs.len() + 1) != pvk.vk.gamma_abc_g1.len() {
+        return Err(SynthesisError::MalformedVerifyingKey).map_err(|e| e.into());
+    }
 
     let mut g_ic = pvk.vk.gamma_abc_g1[0].into_projective();
     for (i, b) in public_inputs.iter().zip(pvk.vk.gamma_abc_g1.iter().skip(1)) {
@@ -40,7 +41,10 @@ pub fn prepare_inputs<E: PairingEngine>(
 }
 
 /// Verify the proof of the Subspace Snark on the equality of openings of cp_link and proof.d
-pub fn verify_link_proof<E: PairingEngine>(vk: &VerifyingKey<E>, proof: &Proof<E>) -> bool {
+pub fn verify_link_proof<E: PairingEngine>(
+    vk: &VerifyingKey<E>,
+    proof: &Proof<E>,
+) -> crate::Result<()> {
     let commitments = vec![proof.link_d.into_projective(), proof.d.into_projective()];
     PESubspaceSnark::<E>::verify(
         &vk.link_pp,
@@ -51,6 +55,7 @@ pub fn verify_link_proof<E: PairingEngine>(vk: &VerifyingKey<E>, proof: &Proof<E
             .collect::<Vec<_>>(),
         &proof.link_pi,
     )
+    .map_err(|e| e.into())
 }
 
 /// Verify a LegoGroth16 proof `proof` against the prepared verification key `pvk`
@@ -58,12 +63,8 @@ pub fn verify_proof<E: PairingEngine>(
     pvk: &PreparedVerifyingKey<E>,
     proof: &Proof<E>,
     public_inputs: Option<&[E::Fr]>,
-) -> R1CSResult<bool> {
-    // TODO: Return error indicating what failed rather than a boolean
-    let link_verified = verify_link_proof(&pvk.vk, proof);
-    if !link_verified {
-        return Ok(false);
-    }
+) -> crate::Result<()> {
+    verify_link_proof(&pvk.vk, proof)?;
     let mut d = proof.d.into_projective();
     if let Some(inputs) = public_inputs {
         d.add_assign(prepare_inputs(pvk, inputs)?);
@@ -80,7 +81,10 @@ pub fn verify_proof<E: PairingEngine>(
 
     let test = E::final_exponentiation(&qap).ok_or(SynthesisError::UnexpectedIdentity)?;
 
-    Ok(test == pvk.alpha_g1_beta_g2)
+    if test != pvk.alpha_g1_beta_g2 {
+        return Err(Error::InvalidProof);
+    }
+    Ok(())
 }
 
 /// Redact public inputs from the commitment in the proof such that commitment opens only to the witnesses
@@ -88,12 +92,17 @@ pub fn get_commitment_to_witnesses<E: PairingEngine>(
     vk: &VerifyingKey<E>,
     proof: &Proof<E>,
     public_inputs: &[E::Fr],
-) -> Result<E::G1Affine, SynthesisError> {
-    // TODO: Use errors for size checks
+) -> crate::Result<E::G1Affine> {
     let inputs = public_inputs
         .into_iter()
         .map(|p| p.into_repr())
         .collect::<Vec<_>>();
+    if inputs.len() > vk.link_bases.len() {
+        return Err(Error::VectorLongerThanExpected(
+            inputs.len(),
+            vk.link_bases.len(),
+        ));
+    }
     let mut g_link = vk.link_bases[0].into_projective();
     g_link.add_assign(VariableBaseMSM::multi_scalar_mul(
         &vk.link_bases[1..],

@@ -151,8 +151,8 @@ fn test_mimc_legogroth16() {
     // This proof has a commitment to both left and right inputs
 
     use legogroth16::{
-        create_random_proof, generate_random_parameters, get_commitment_to_witnesses,
-        prepare_verifying_key, verify_proof,
+        create_random_proof, data_structures::LinkPublicGenerators, generate_random_parameters,
+        get_commitment_to_witnesses, prepare_verifying_key, verify_proof,
     };
 
     // This may not be cryptographically safe, use
@@ -165,9 +165,16 @@ fn test_mimc_legogroth16() {
     println!("Creating parameters...");
 
     // Need 5 bases, 1 for public input, 2 for witnesses xl and xr, 1 for instance variable 1 and 1 for randomness (link_v)
-    let pedersen_bases = (0..5)
+    let pedersen_gens = (0..5)
         .map(|_| ark_bls12_377::G1Projective::rand(&mut rng).into_affine())
         .collect::<Vec<_>>();
+    let g1 = ark_bls12_377::G1Projective::rand(&mut rng).into_affine();
+    let g2 = ark_bls12_377::G2Projective::rand(&mut rng).into_affine();
+    let link_gens = LinkPublicGenerators {
+        pedersen_gens,
+        g1,
+        g2,
+    };
 
     // Create parameters for our circuit
     let params = {
@@ -177,8 +184,7 @@ fn test_mimc_legogroth16() {
             constants: &constants,
         };
 
-        generate_random_parameters::<Bls12_377, _, _>(c, pedersen_bases.clone(), 2, &mut rng)
-            .unwrap()
+        generate_random_parameters::<Bls12_377, _, _>(c, link_gens.clone(), 2, &mut rng).unwrap()
     };
 
     // Prepare the verification key (for proof verification)
@@ -218,22 +224,20 @@ fn test_mimc_legogroth16() {
 
             let start = Instant::now();
             // Create a LegoGro16 proof with our parameters.
-            let proof = create_random_proof(c, v, link_v, &params, true, &mut rng).unwrap();
+            let proof = create_random_proof(c, v, link_v, &params, &mut rng).unwrap();
             total_proving += start.elapsed();
 
-            assert!(
-                verify_commitment(&params.vk, &proof, &[image], &[xl, xr], &v, &link_v).unwrap()
-            );
+            verify_commitment(&params.vk, &proof, &[image], &[xl, xr], &v, &link_v).unwrap();
 
             let start = Instant::now();
-            assert!(verify_proof(&pvk, &proof, None).unwrap());
+            verify_proof(&pvk, &proof, None).unwrap();
             total_verifying += start.elapsed();
 
             assert_eq!(
                 get_commitment_to_witnesses(&params.vk, &proof, &[image]).unwrap(),
-                (pedersen_bases[2].mul(xl.into_repr())
-                    + pedersen_bases[3].mul(xr.into_repr())
-                    + pedersen_bases[4].mul(link_v.into_repr()))
+                (link_gens.pedersen_gens[2].mul(xl.into_repr())
+                    + link_gens.pedersen_gens[3].mul(xr.into_repr())
+                    + link_gens.pedersen_gens[4].mul(link_v.into_repr()))
                 .into_affine()
             );
             // proof.write(&mut proof_vec).unwrap();

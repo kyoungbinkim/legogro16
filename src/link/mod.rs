@@ -1,8 +1,9 @@
-mod matrix;
-mod snark;
+pub mod error;
+pub mod snark;
+mod utils;
 
-pub use matrix::*;
 pub use snark::*;
+pub use utils::*;
 
 #[cfg(test)]
 mod test {
@@ -23,7 +24,7 @@ mod test {
         let mut pp = PP::<G1Affine, G2Affine> { l: 1, t: 2, g1, g2 };
 
         let mut m = SparseMatrix::new(1, 2);
-        m.insert_row_slice(0, 0, &vec![g1, g1]);
+        m.insert_row_slice(0, 0, vec![g1, g1]).unwrap();
 
         let x: Vec<Fr> = vec![Fr::one(), Fr::zero()];
 
@@ -31,15 +32,13 @@ mod test {
 
         let y: Vec<G1Affine> = vec![g1];
 
-        let (ek, vk) = PESubspaceSnark::<Bls12_381>::keygen(&mut rng, &pp, m);
+        let (ek, vk) = PESubspaceSnark::<Bls12_381>::keygen(&mut rng, &pp, &m).unwrap();
 
-        let pi = PESubspaceSnark::<Bls12_381>::prove(&mut pp, &ek, &x);
-        let pi_bad = PESubspaceSnark::<Bls12_381>::prove(&mut pp, &ek, &x_bad);
+        let pi = PESubspaceSnark::<Bls12_381>::prove(&mut pp, &ek, &x).unwrap();
+        let pi_bad = PESubspaceSnark::<Bls12_381>::prove(&mut pp, &ek, &x_bad).unwrap();
 
-        let b = PESubspaceSnark::<Bls12_381>::verify(&pp, &vk, &y, &pi);
-        let b_bad = PESubspaceSnark::<Bls12_381>::verify(&pp, &vk, &y, &pi_bad);
-        assert!(b);
-        assert!(!b_bad);
+        PESubspaceSnark::<Bls12_381>::verify(&pp, &vk, &y, &pi).unwrap();
+        assert!(PESubspaceSnark::<Bls12_381>::verify(&pp, &vk, &y, &pi_bad).is_err());
     }
 
     #[test]
@@ -54,7 +53,7 @@ mod test {
         let h1 = G1Projective::rand(&mut rng).into_affine();
         let h2 = G1Projective::rand(&mut rng).into_affine();
         let mut m = SparseMatrix::new(1, 2);
-        m.insert_row_slice(0, 0, &vec![h1, h2]);
+        m.insert_row_slice(0, 0, vec![h1, h2]).unwrap();
 
         let two = Fr::one() + Fr::one();
         let three = Fr::one() + two;
@@ -71,15 +70,13 @@ mod test {
             .add(h2.into_projective().mul(three.into_repr()))
             .into_affine()];
 
-        let (ek, vk) = PESubspaceSnark::<Bls12_381>::keygen(&mut rng, &pp, m);
+        let (ek, vk) = PESubspaceSnark::<Bls12_381>::keygen(&mut rng, &pp, &m).unwrap();
 
-        let pi = PESubspaceSnark::<Bls12_381>::prove(&mut pp, &ek, &w);
-        let pi_bad = PESubspaceSnark::<Bls12_381>::prove(&mut pp, &ek, &w_bad);
+        let pi = PESubspaceSnark::<Bls12_381>::prove(&mut pp, &ek, &w).unwrap();
+        let pi_bad = PESubspaceSnark::<Bls12_381>::prove(&mut pp, &ek, &w_bad).unwrap();
 
-        let b = PESubspaceSnark::<Bls12_381>::verify(&pp, &vk, &y, &pi);
-        let b_bad = PESubspaceSnark::<Bls12_381>::verify(&pp, &vk, &y, &pi_bad);
-        assert!(b);
-        assert!(!b_bad);
+        PESubspaceSnark::<Bls12_381>::verify(&pp, &vk, &y, &pi).unwrap();
+        assert!(PESubspaceSnark::<Bls12_381>::verify(&pp, &vk, &y, &pi_bad).is_err());
     }
 
     #[test]
@@ -101,9 +98,10 @@ mod test {
             .map(|p| p.into_affine())
             .collect::<Vec<_>>();
         let mut m = SparseMatrix::new(2, 3);
-        m.insert_row_slice(0, 0, &vec![bases1[0]]);
-        m.insert_row_slice(0, 2, &vec![bases1[1]]);
-        m.insert_row_slice(1, 1, &vec![bases2[0], bases2[1]]);
+        m.insert_row_slice(0, 0, vec![bases1[0]]).unwrap();
+        m.insert_row_slice(0, 2, vec![bases1[1]]).unwrap();
+        m.insert_row_slice(1, 1, vec![bases2[0], bases2[1]])
+            .unwrap();
 
         let w: Vec<Fr> = vec![Fr::rand(&mut rng), Fr::rand(&mut rng), Fr::rand(&mut rng)];
 
@@ -115,12 +113,11 @@ mod test {
         .map(|p| p.into_affine())
         .collect::<Vec<_>>();
 
-        let (ek, vk) = PESubspaceSnark::<Bls12_381>::keygen(&mut rng, &pp, m);
+        let (ek, vk) = PESubspaceSnark::<Bls12_381>::keygen(&mut rng, &pp, &m).unwrap();
 
-        let pi = PESubspaceSnark::<Bls12_381>::prove(&mut pp, &ek, &w);
+        let pi = PESubspaceSnark::<Bls12_381>::prove(&mut pp, &ek, &w).unwrap();
 
-        let b = PESubspaceSnark::<Bls12_381>::verify(&pp, &vk, &x, &pi);
-        assert!(b);
+        PESubspaceSnark::<Bls12_381>::verify(&pp, &vk, &x, &pi).unwrap();
     }
 
     #[test]
@@ -153,9 +150,9 @@ mod test {
         .collect::<Vec<_>>();
 
         let mut m = SparseMatrix::new(l, t);
-        m.insert_row_slice(0, 0, &bases1);
-        m.insert_row_slice(1, 0, &bases2[0..2]);
-        m.insert_row_slice(1, 3, &bases2[2..]);
+        m.insert_row_slice(0, 0, bases1.clone()).unwrap();
+        m.insert_row_slice(1, 0, bases2[0..2].to_vec()).unwrap();
+        m.insert_row_slice(1, 3, bases2[2..].to_vec()).unwrap();
 
         let w: Vec<Fr> = vec![
             Fr::rand(&mut rng),
@@ -176,11 +173,10 @@ mod test {
         .map(|p| p.into_affine())
         .collect::<Vec<_>>();
 
-        let (ek, vk) = PESubspaceSnark::<Bls12_381>::keygen(&mut rng, &pp, m);
+        let (ek, vk) = PESubspaceSnark::<Bls12_381>::keygen(&mut rng, &pp, &m).unwrap();
 
-        let pi = PESubspaceSnark::<Bls12_381>::prove(&mut pp, &ek, &w);
+        let pi = PESubspaceSnark::<Bls12_381>::prove(&mut pp, &ek, &w).unwrap();
 
-        let b = PESubspaceSnark::<Bls12_381>::verify(&pp, &vk, &x, &pi);
-        assert!(b);
+        PESubspaceSnark::<Bls12_381>::verify(&pp, &vk, &x, &pi).unwrap();
     }
 }

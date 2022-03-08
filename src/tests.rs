@@ -1,7 +1,10 @@
-use crate::{create_random_proof, generate_random_parameters, prepare_verifying_key, verify_proof};
+use crate::{
+    create_random_proof, generate_random_parameters, prepare_verifying_key, verify_proof,
+    LinkPublicGenerators,
+};
 use ark_ec::{AffineCurve, PairingEngine, ProjectiveCurve};
 use ark_ff::{PrimeField, UniformRand};
-use ark_std::rand::{rngs::StdRng, SeedableRng};
+use ark_std::rand::{rngs::StdRng, RngCore, SeedableRng};
 
 use core::ops::MulAssign;
 
@@ -124,7 +127,23 @@ impl<ConstraintF: Field> ConstraintSynthesizer<ConstraintF> for MyLessSillyCircu
     }
 }
 
-fn test_prove_and_verify<E>(n_iters: usize, commit_to_instance: bool)
+pub fn get_link_public_gens<R: RngCore, E: PairingEngine>(
+    rng: &mut R,
+    count: usize,
+) -> LinkPublicGenerators<E> {
+    let pedersen_gens = (0..count)
+        .map(|_| E::G1Projective::rand(rng).into_affine())
+        .collect::<Vec<_>>();
+    let g1 = E::G1Projective::rand(rng).into_affine();
+    let g2 = E::G2Projective::rand(rng).into_affine();
+    LinkPublicGenerators {
+        pedersen_gens,
+        g1,
+        g2,
+    }
+}
+
+fn test_prove_and_verify<E>(n_iters: usize)
 where
     E: PairingEngine,
 {
@@ -137,15 +156,13 @@ where
         let commit_witness_count = 2;
 
         // Generators for committing to instance variables and witnesses and 1 more for randomness (`link_v` below)
-        let pedersen_bases = (0..num_instance_variables + commit_witness_count + 1)
-            .map(|_| E::G1Projective::rand(&mut rng).into_affine())
-            .collect::<Vec<_>>();
-
+        let link_gens =
+            get_link_public_gens(&mut rng, num_instance_variables + commit_witness_count + 1);
         let circuit = MySillyCircuit { a: None, b: None };
 
         let params = generate_random_parameters::<E, _, _>(
             circuit,
-            pedersen_bases.clone(),
+            link_gens.clone(),
             commit_witness_count,
             &mut rng,
         )
@@ -171,47 +188,21 @@ where
             };
 
             // Create a LegoGro16 proof with our parameters.
-            let proof =
-                create_random_proof(circuit, v, link_v, &params, commit_to_instance, &mut rng)
-                    .unwrap();
+            let proof = create_random_proof(circuit, v, link_v, &params, &mut rng).unwrap();
 
             // Prover verifies the openings of the commitments
-            if commit_to_instance {
-                assert!(verify_commitment(&params.vk, &proof, &[c], &[a, b], &v, &link_v).unwrap());
-                assert!(!verify_commitment(&params.vk, &proof, &[c], &[a], &v, &link_v).unwrap());
-                assert!(
-                    !verify_commitment(&params.vk, &proof, &[a], &[a, b], &v, &link_v).unwrap()
-                );
+            verify_commitment(&params.vk, &proof, &[c], &[a, b], &v, &link_v).unwrap();
+            assert!(verify_commitment(&params.vk, &proof, &[c], &[a], &v, &link_v).is_err());
+            assert!(verify_commitment(&params.vk, &proof, &[a], &[a, b], &v, &link_v).is_err());
 
-                assert!(verify_proof(&pvk, &proof, None).unwrap());
-                assert_eq!(
-                    get_commitment_to_witnesses(&params.vk, &proof, &[c]).unwrap(),
-                    (pedersen_bases[2].mul(a.into_repr())
-                        + pedersen_bases[3].mul(b.into_repr())
-                        + pedersen_bases[4].mul(link_v.into_repr()))
-                    .into_affine()
-                );
-            } else {
-                // assert!(verify_commitment(&params.vk, &proof, &[], &[a, b], &v, &link_v).unwrap());
-                // assert!(!verify_commitment(&params.vk, &proof, &[], &[a], &v, &link_v).unwrap());
-                // assert!(
-                //     !verify_commitment(&params.vk, &proof, &[c], &[a, b], &v, &link_v).unwrap()
-                // );
-                // assert!(
-                //     !verify_commitment(&params.vk, &proof, &[a], &[a, b], &v, &link_v).unwrap()
-                // );
-
-                assert!(verify_proof(&pvk, &proof, Some(&[c])).unwrap());
-
-                assert_eq!(
-                    // get_commitment_to_witnesses(&params.vk, &proof, &[]).unwrap(),
-                    proof.link_d,
-                    (pedersen_bases[2].mul(a.into_repr())
-                        + pedersen_bases[3].mul(b.into_repr())
-                        + pedersen_bases[4].mul(link_v.into_repr()))
-                    .into_affine()
-                );
-            }
+            verify_proof(&pvk, &proof, None).unwrap();
+            assert_eq!(
+                get_commitment_to_witnesses(&params.vk, &proof, &[c]).unwrap(),
+                (link_gens.pedersen_gens[2].mul(a.into_repr())
+                    + link_gens.pedersen_gens[3].mul(b.into_repr())
+                    + link_gens.pedersen_gens[4].mul(link_v.into_repr()))
+                .into_affine()
+            );
         }
     }
 
@@ -220,15 +211,14 @@ where
         let commit_witness_count = 1;
 
         // Generators for committing to instance variables and witnesses and 1 more for randomness (`link_v` below)
-        let pedersen_bases = (0..num_instance_variables + commit_witness_count + 1)
-            .map(|_| E::G1Projective::rand(&mut rng).into_affine())
-            .collect::<Vec<_>>();
+        let link_gens =
+            get_link_public_gens(&mut rng, num_instance_variables + commit_witness_count + 1);
 
         let circuit = MySillyCircuit { a: None, b: None };
 
         let params = generate_random_parameters::<E, _, _>(
             circuit,
-            pedersen_bases.clone(),
+            link_gens.clone(),
             commit_witness_count,
             &mut rng,
         )
@@ -254,47 +244,26 @@ where
             };
 
             // Create a LegoGro16 proof with our parameters.
-            let proof =
-                create_random_proof(circuit, v, link_v, &params, commit_to_instance, &mut rng)
-                    .unwrap();
+            let proof = create_random_proof(circuit, v, link_v, &params, &mut rng).unwrap();
 
             // Prover verifies the openings of the commitments
-            if commit_to_instance {
-                assert!(verify_commitment(&params.vk, &proof, &[c], &[a], &v, &link_v).unwrap());
-                assert!(
-                    !verify_commitment(&params.vk, &proof, &[c], &[a, b], &v, &link_v).unwrap()
-                );
-                assert!(!verify_commitment(&params.vk, &proof, &[b], &[a], &v, &link_v).unwrap());
+            verify_commitment(&params.vk, &proof, &[c], &[a], &v, &link_v).unwrap();
+            assert!(verify_commitment(&params.vk, &proof, &[c], &[a, b], &v, &link_v).is_err());
+            assert!(verify_commitment(&params.vk, &proof, &[b], &[a], &v, &link_v).is_err());
 
-                assert!(verify_proof(&pvk, &proof, None).unwrap());
+            verify_proof(&pvk, &proof, None).unwrap();
 
-                assert_eq!(
-                    get_commitment_to_witnesses(&params.vk, &proof, &[c]).unwrap(),
-                    (pedersen_bases[2].mul(a.into_repr())
-                        + pedersen_bases[3].mul(link_v.into_repr()))
-                    .into_affine()
-                );
-            } else {
-                // assert!(verify_commitment(&params.vk, &proof, &[], &[a], &v, &link_v).unwrap());
-                // assert!(!verify_commitment(&params.vk, &proof, &[], &[a, b], &v, &link_v).unwrap());
-                // assert!(!verify_commitment(&params.vk, &proof, &[c], &[a], &v, &link_v).unwrap());
-                // assert!(!verify_commitment(&params.vk, &proof, &[b], &[a], &v, &link_v).unwrap());
-
-                assert!(verify_proof(&pvk, &proof, Some(&[c])).unwrap());
-
-                assert_eq!(
-                    proof.link_d,
-                    // get_commitment_to_witnesses(&params.vk, &proof, &[]).unwrap(),
-                    (pedersen_bases[2].mul(a.into_repr())
-                        + pedersen_bases[3].mul(link_v.into_repr()))
-                    .into_affine()
-                );
-            }
+            assert_eq!(
+                get_commitment_to_witnesses(&params.vk, &proof, &[c]).unwrap(),
+                (link_gens.pedersen_gens[2].mul(a.into_repr())
+                    + link_gens.pedersen_gens[3].mul(link_v.into_repr()))
+                .into_affine()
+            );
         }
     }
 }
 
-fn test_prove_and_verify_1<E>(n_iters: usize, commit_to_instance: bool)
+fn test_prove_and_verify_1<E>(n_iters: usize)
 where
     E: PairingEngine,
 {
@@ -306,9 +275,8 @@ where
     let commit_witness_count = 4;
 
     // Generators for committing to instance variables and witnesses and 1 more for randomness (`link_v` below)
-    let pedersen_bases = (0..num_instance_variables + commit_witness_count + 1)
-        .map(|_| E::G1Projective::rand(&mut rng).into_affine())
-        .collect::<Vec<_>>();
+    let link_gens =
+        get_link_public_gens(&mut rng, num_instance_variables + commit_witness_count + 1);
 
     let params = generate_random_parameters::<E, _, _>(
         MyLessSillyCircuit {
@@ -317,7 +285,7 @@ where
             c: None,
             d: None,
         },
-        pedersen_bases.clone(),
+        link_gens.clone(),
         commit_witness_count,
         &mut rng,
     )
@@ -353,52 +321,28 @@ where
             d: Some(d),
         };
 
-        let proof =
-            create_random_proof(circuit, v, link_v, &params, commit_to_instance, &mut rng).unwrap();
+        let proof = create_random_proof(circuit, v, link_v, &params, &mut rng).unwrap();
 
         // Prover verifies the openings of the commitments
-        if commit_to_instance {
-            assert!(
-                verify_commitment(&params.vk, &proof, &[y], &[a, b, c, d], &v, &link_v).unwrap()
-            );
-            assert!(
-                !verify_commitment(&params.vk, &proof, &[a], &[a, b, c, d], &v, &link_v).unwrap()
-            );
-            assert!(!verify_commitment(&params.vk, &proof, &[y], &[a, b, c], &v, &link_v).unwrap());
+        verify_commitment(&params.vk, &proof, &[y], &[a, b, c, d], &v, &link_v).unwrap();
+        assert!(verify_commitment(&params.vk, &proof, &[a], &[a, b, c, d], &v, &link_v).is_err());
+        assert!(verify_commitment(&params.vk, &proof, &[y], &[a, b, c], &v, &link_v).is_err());
 
-            assert!(verify_proof(&pvk, &proof, None).unwrap());
+        verify_proof(&pvk, &proof, None).unwrap();
 
-            assert_eq!(
-                get_commitment_to_witnesses(&params.vk, &proof, &[y]).unwrap(),
-                (pedersen_bases[2].mul(a.into_repr())
-                    + pedersen_bases[3].mul(b.into_repr())
-                    + pedersen_bases[4].mul(c.into_repr())
-                    + pedersen_bases[5].mul(d.into_repr())
-                    + pedersen_bases[6].mul(link_v.into_repr()))
-                .into_affine()
-            );
-        } else {
-            // assert!(verify_commitment(&params.vk, &proof, &[y], &[a, b, c, d], &v, &link_v).unwrap());
-            // assert!(!verify_commitment(&params.vk, &proof, &[a], &[a, b, c, d], &v, &link_v).unwrap());
-            // assert!(!verify_commitment(&params.vk, &proof, &[y], &[a, b, c], &v, &link_v).unwrap());
-
-            assert!(verify_proof(&pvk, &proof, Some(&[y])).unwrap());
-
-            assert_eq!(
-                // get_commitment_to_witnesses(&params.vk, &proof, &[y]).unwrap(),
-                proof.link_d,
-                (pedersen_bases[2].mul(a.into_repr())
-                    + pedersen_bases[3].mul(b.into_repr())
-                    + pedersen_bases[4].mul(c.into_repr())
-                    + pedersen_bases[5].mul(d.into_repr())
-                    + pedersen_bases[6].mul(link_v.into_repr()))
-                .into_affine()
-            );
-        }
+        assert_eq!(
+            get_commitment_to_witnesses(&params.vk, &proof, &[y]).unwrap(),
+            (link_gens.pedersen_gens[2].mul(a.into_repr())
+                + link_gens.pedersen_gens[3].mul(b.into_repr())
+                + link_gens.pedersen_gens[4].mul(c.into_repr())
+                + link_gens.pedersen_gens[5].mul(d.into_repr())
+                + link_gens.pedersen_gens[6].mul(link_v.into_repr()))
+            .into_affine()
+        );
     }
 }
 
-fn test_prove_and_verify_2<E>(n_iters: usize, commit_to_instance: bool)
+fn test_prove_and_verify_2<E>(n_iters: usize)
 where
     E: PairingEngine,
 {
@@ -410,9 +354,8 @@ where
     let commit_witness_count = 4;
 
     // Generators for committing to instance variables and witnesses and 1 more for randomness (`link_v` below)
-    let pedersen_bases = (0..num_instance_variables + commit_witness_count + 1)
-        .map(|_| E::G1Projective::rand(&mut rng).into_affine())
-        .collect::<Vec<_>>();
+    let link_gens =
+        get_link_public_gens(&mut rng, num_instance_variables + commit_witness_count + 1);
 
     let params = generate_random_parameters::<E, _, _>(
         MyLessSillyCircuit1 {
@@ -421,7 +364,7 @@ where
             c: None,
             d: None,
         },
-        pedersen_bases.clone(),
+        link_gens.clone(),
         4,
         &mut rng,
     )
@@ -457,52 +400,25 @@ where
             d: Some(d),
         };
 
-        let proof =
-            create_random_proof(circuit, v, link_v, &params, commit_to_instance, &mut rng).unwrap();
+        let proof = create_random_proof(circuit, v, link_v, &params, &mut rng).unwrap();
         // Prover verifies the openings of the commitments
-        if commit_to_instance {
-            assert!(
-                verify_commitment(&params.vk, &proof, &[e, f], &[a, b, c, d], &v, &link_v).unwrap()
-            );
-            assert!(
-                !verify_commitment(&params.vk, &proof, &[a, b], &[a, b, c, d], &v, &link_v)
-                    .unwrap()
-            );
-            assert!(!verify_commitment(&params.vk, &proof, &[e, f], &[a, b], &v, &link_v).unwrap());
+        verify_commitment(&params.vk, &proof, &[e, f], &[a, b, c, d], &v, &link_v).unwrap();
+        assert!(
+            verify_commitment(&params.vk, &proof, &[a, b], &[a, b, c, d], &v, &link_v).is_err()
+        );
+        assert!(verify_commitment(&params.vk, &proof, &[e, f], &[a, b], &v, &link_v).is_err());
 
-            assert!(verify_proof(&pvk, &proof, None).unwrap());
+        verify_proof(&pvk, &proof, None).unwrap();
 
-            assert_eq!(
-                get_commitment_to_witnesses(&params.vk, &proof, &[e, f]).unwrap(),
-                (pedersen_bases[3].mul(a.into_repr())
-                    + pedersen_bases[4].mul(b.into_repr())
-                    + pedersen_bases[5].mul(c.into_repr())
-                    + pedersen_bases[6].mul(d.into_repr())
-                    + pedersen_bases[7].mul(link_v.into_repr()))
-                .into_affine()
-            );
-        } else {
-            // assert!(
-            //     verify_commitment(&params.vk, &proof, &[e, f], &[a, b, c, d], &v, &link_v).unwrap()
-            // );
-            // assert!(
-            //     !verify_commitment(&params.vk, &proof, &[a, b], &[a, b, c, d], &v, &link_v).unwrap()
-            // );
-            // assert!(!verify_commitment(&params.vk, &proof, &[e, f], &[a, b], &v, &link_v).unwrap());
-
-            assert!(verify_proof(&pvk, &proof, Some(&[e, f])).unwrap());
-
-            assert_eq!(
-                // get_commitment_to_witnesses(&params.vk, &proof, &[e, f]).unwrap(),
-                proof.link_d,
-                (pedersen_bases[3].mul(a.into_repr())
-                    + pedersen_bases[4].mul(b.into_repr())
-                    + pedersen_bases[5].mul(c.into_repr())
-                    + pedersen_bases[6].mul(d.into_repr())
-                    + pedersen_bases[7].mul(link_v.into_repr()))
-                .into_affine()
-            );
-        }
+        assert_eq!(
+            get_commitment_to_witnesses(&params.vk, &proof, &[e, f]).unwrap(),
+            (link_gens.pedersen_gens[3].mul(a.into_repr())
+                + link_gens.pedersen_gens[4].mul(b.into_repr())
+                + link_gens.pedersen_gens[5].mul(c.into_repr())
+                + link_gens.pedersen_gens[6].mul(d.into_repr())
+                + link_gens.pedersen_gens[7].mul(link_v.into_repr()))
+            .into_affine()
+        );
     }
 }
 
@@ -512,20 +428,17 @@ mod bls12_377 {
 
     #[test]
     fn prove_and_verify() {
-        test_prove_and_verify::<Bls12_377>(10, true);
-        test_prove_and_verify::<Bls12_377>(10, false);
+        test_prove_and_verify::<Bls12_377>(10);
     }
 
     #[test]
     fn prove_and_verify_1() {
-        test_prove_and_verify_1::<Bls12_377>(10, true);
-        test_prove_and_verify_1::<Bls12_377>(10, false);
+        test_prove_and_verify_1::<Bls12_377>(10);
     }
 
     #[test]
     fn prove_and_verify_2() {
-        test_prove_and_verify_2::<Bls12_377>(10, true);
-        test_prove_and_verify_2::<Bls12_377>(10, false);
+        test_prove_and_verify_2::<Bls12_377>(10);
     }
 }
 
@@ -536,19 +449,16 @@ mod cp6_782 {
 
     #[test]
     fn prove_and_verify() {
-        test_prove_and_verify::<CP6_782>(1, true);
-        test_prove_and_verify::<CP6_782>(1, false);
+        test_prove_and_verify::<CP6_782>(1);
     }
 
     #[test]
     fn prove_and_verify_1() {
-        test_prove_and_verify_1::<CP6_782>(1, true);
-        test_prove_and_verify_1::<CP6_782>(1, false);
+        test_prove_and_verify_1::<CP6_782>(1);
     }
 
     #[test]
     fn prove_and_verify_2() {
-        test_prove_and_verify_2::<CP6_782>(1, true);
-        test_prove_and_verify_2::<CP6_782>(1, false);
+        test_prove_and_verify_2::<CP6_782>(1);
     }
 }
