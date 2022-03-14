@@ -195,18 +195,13 @@ where
     g_c -= &v_eta_delta_inv;
     end_timer!(c_time);
 
-    let mut commit_assignments = vec![];
-    commit_assignments.extend_from_slice(&input_assignment_wth_one);
-    commit_assignments.extend_from_slice(committed_witnesses);
-
-    drop(aux_assignment);
-
     // Compute D
     let d_acc_time = start_timer!(|| "Compute D");
 
-    let gamma_abc_inputs_source = &pk.vk.gamma_abc_g1[..];
+    let gamma_abc_inputs_source = &pk.vk.gamma_abc_g1[input_assignment_wth_one.len()
+        ..input_assignment_wth_one.len() + committed_witnesses.len()];
     let gamma_abc_inputs_acc =
-        VariableBaseMSM::multi_scalar_mul(gamma_abc_inputs_source, &commit_assignments);
+        VariableBaseMSM::multi_scalar_mul(gamma_abc_inputs_source, &committed_witnesses);
 
     let v_eta_gamma_inv = pk.vk.eta_gamma_inv_g1.into_projective().mul(v_repr);
 
@@ -214,8 +209,7 @@ where
     g_d += &v_eta_gamma_inv;
     end_timer!(d_acc_time);
 
-    let mut commit_assignments_with_link_hider = vec![];
-    commit_assignments_with_link_hider.append(&mut commit_assignments);
+    let mut commit_assignments_with_link_hider = committed_witnesses.to_vec();
     commit_assignments_with_link_hider.push(link_v.into_repr());
 
     let g_d_link =
@@ -230,6 +224,8 @@ where
     let link_pi = PESubspaceSnark::<E>::prove(&pk.vk.link_pp, &pk.link_ek, &ss_snark_witness)?;
 
     end_timer!(link_time);
+
+    drop(aux_assignment);
 
     Ok(Proof {
         a: g_a.into_affine(),
@@ -262,32 +258,22 @@ fn calculate_coeff<G: AffineCurve>(
 pub fn verify_link_commitment<E: PairingEngine>(
     cp_link_bases: &[E::G1Affine],
     proof: &Proof<E>,
-    public_inputs: &[E::Fr],
     witnesses_expected_in_commitment: &[E::Fr],
     link_v: &E::Fr,
 ) -> crate::Result<()> {
-    // Both public inputs and some witnesses are committed in `proof.link_d` with randomness `link_v`
-    // Public inputs also includes the field element 1.
-    if (public_inputs.len() + witnesses_expected_in_commitment.len() + 2) > cp_link_bases.len() {
+    // Some witnesses are committed in `proof.link_d` with randomness `link_v`
+    if (witnesses_expected_in_commitment.len() + 1) > cp_link_bases.len() {
         return Err(Error::VectorLongerThanExpected(
-            public_inputs.len() + witnesses_expected_in_commitment.len() + 2,
+            witnesses_expected_in_commitment.len() + 1,
             cp_link_bases.len(),
         ));
     }
-    let committed = public_inputs
-        .iter()
-        .chain(witnesses_expected_in_commitment.iter())
+    let mut committed = cfg_iter!(witnesses_expected_in_commitment)
         .map(|p| p.into_repr())
         .collect::<Vec<_>>();
+    committed.push(link_v.into_repr());
 
-    let mut g_link = cp_link_bases[0].into_projective();
-    g_link.add_assign(VariableBaseMSM::multi_scalar_mul(
-        &cp_link_bases[1..],
-        &committed,
-    ));
-    g_link.add_assign(&cp_link_bases[1 + committed.len()].mul(link_v.into_repr()));
-
-    if proof.link_d != g_link.into_affine() {
+    if proof.link_d != VariableBaseMSM::multi_scalar_mul(cp_link_bases, &committed).into_affine() {
         return Err(Error::InvalidLinkCommitment);
     }
     Ok(())
@@ -299,41 +285,37 @@ pub fn verify_link_commitment<E: PairingEngine>(
 pub fn verify_commitment<E: PairingEngine>(
     vk: &VerifyingKey<E>,
     proof: &Proof<E>,
-    public_inputs: &[E::Fr],
+    public_inputs_count: usize,
     witnesses_expected_in_commitment: &[E::Fr],
     v: &E::Fr,
     link_v: &E::Fr,
 ) -> crate::Result<()> {
-    // Both public inputs and some witnesses are committed in `proof.d` with randomness `v`
-    if (public_inputs.len() + witnesses_expected_in_commitment.len() + 1) > vk.gamma_abc_g1.len() {
+    // Some witnesses are also committed in `proof.d` with randomness `v`
+    if (public_inputs_count + witnesses_expected_in_commitment.len() + 1) > vk.gamma_abc_g1.len() {
         return Err(Error::VectorLongerThanExpected(
-            public_inputs.len() + witnesses_expected_in_commitment.len() + 1,
+            public_inputs_count + witnesses_expected_in_commitment.len() + 1,
             vk.gamma_abc_g1.len(),
         ));
     }
     verify_link_commitment(
         &vk.link_bases,
         proof,
-        public_inputs,
         witnesses_expected_in_commitment,
         link_v,
     )?;
 
-    // Check that proof.d is correctly constructed.
-    let inputs = public_inputs
-        .iter()
-        .chain(witnesses_expected_in_commitment.iter())
+    let committed = cfg_iter!(witnesses_expected_in_commitment)
         .map(|p| p.into_repr())
         .collect::<Vec<_>>();
 
-    let mut g_ic = vk.gamma_abc_g1[0].into_projective();
-    g_ic.add_assign(VariableBaseMSM::multi_scalar_mul(
-        &vk.gamma_abc_g1[1..],
-        &inputs,
-    ));
-    g_ic.add_assign(&vk.eta_gamma_inv_g1.mul(v.into_repr()));
+    // Check that proof.d is correctly constructed.
+    let mut d = VariableBaseMSM::multi_scalar_mul(
+        &vk.gamma_abc_g1[1 + public_inputs_count..1 + public_inputs_count + committed.len()],
+        &committed,
+    );
+    d.add_assign(&vk.eta_gamma_inv_g1.mul(v.into_repr()));
 
-    if proof.d != g_ic.into_affine() {
+    if proof.d != d.into_affine() {
         return Err(Error::InvalidProofCommitment);
     }
 

@@ -16,7 +16,7 @@ pub struct Proof<E: PairingEngine> {
     pub b: E::G2Affine,
     /// The `C` element in `G1`.
     pub c: E::G1Affine,
-    /// The `D` element in `G1`.
+    /// The `D` element in `G1`. Commits to a subset of private inputs of the circuit
     pub d: E::G1Affine,
     /// cp_{link}
     pub link_d: E::G1Affine,

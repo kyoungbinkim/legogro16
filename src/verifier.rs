@@ -7,7 +7,6 @@ use super::{PreparedVerifyingKey, Proof, VerifyingKey};
 use ark_relations::r1cs::SynthesisError;
 
 use crate::error::Error;
-use ark_ec::msm::VariableBaseMSM;
 use ark_std::vec;
 use ark_std::vec::Vec;
 use core::ops::{AddAssign, Neg};
@@ -28,16 +27,16 @@ pub fn prepare_inputs<E: PairingEngine>(
     pvk: &PreparedVerifyingKey<E>,
     public_inputs: &[E::Fr],
 ) -> crate::Result<E::G1Projective> {
-    if (public_inputs.len() + 1) != pvk.vk.gamma_abc_g1.len() {
+    if (public_inputs.len() + 1) > pvk.vk.gamma_abc_g1.len() {
         return Err(SynthesisError::MalformedVerifyingKey).map_err(|e| e.into());
     }
 
-    let mut g_ic = pvk.vk.gamma_abc_g1[0].into_projective();
+    let mut d = pvk.vk.gamma_abc_g1[0].into_projective();
     for (i, b) in public_inputs.iter().zip(pvk.vk.gamma_abc_g1.iter().skip(1)) {
-        g_ic.add_assign(&b.mul(i.into_repr()));
+        d.add_assign(&b.mul(i.into_repr()));
     }
 
-    Ok(g_ic)
+    Ok(d)
 }
 
 /// Verify the proof of the Subspace Snark on the equality of openings of cp_link and proof.d
@@ -58,55 +57,39 @@ pub fn verify_link_proof<E: PairingEngine>(
     .map_err(|e| e.into())
 }
 
-/// Verify a LegoGroth16 proof `proof` against the prepared verification key `pvk`
-pub fn verify_proof<E: PairingEngine>(
+pub fn verify_qap_proof<E: PairingEngine>(
     pvk: &PreparedVerifyingKey<E>,
-    proof: &Proof<E>,
-    public_inputs: Option<&[E::Fr]>,
+    a: E::G1Affine,
+    b: E::G2Affine,
+    c: E::G1Affine,
+    d: E::G1Affine,
 ) -> crate::Result<()> {
-    verify_link_proof(&pvk.vk, proof)?;
-    let mut d = proof.d.into_projective();
-    if let Some(inputs) = public_inputs {
-        d.add_assign(prepare_inputs(pvk, inputs)?);
-    }
-
     let qap = E::miller_loop(
         [
-            (proof.a.into(), proof.b.into()),
-            (proof.c.into(), pvk.delta_g2_neg_pc.clone()),
-            (d.into_affine().into(), pvk.gamma_g2_neg_pc.clone()),
+            (a.into(), b.into()),
+            (c.into(), pvk.delta_g2_neg_pc.clone()),
+            (d.into(), pvk.gamma_g2_neg_pc.clone()),
         ]
         .iter(),
     );
 
-    let test = E::final_exponentiation(&qap).ok_or(SynthesisError::UnexpectedIdentity)?;
-
-    if test != pvk.alpha_g1_beta_g2 {
+    if E::final_exponentiation(&qap).ok_or(SynthesisError::UnexpectedIdentity)?
+        != pvk.alpha_g1_beta_g2
+    {
         return Err(Error::InvalidProof);
     }
     Ok(())
 }
 
-/// Redact public inputs from the commitment in the proof such that commitment opens only to the witnesses
-pub fn get_commitment_to_witnesses<E: PairingEngine>(
-    vk: &VerifyingKey<E>,
+/// Verify a LegoGroth16 proof `proof` against the prepared verification key `pvk`
+pub fn verify_proof<E: PairingEngine>(
+    pvk: &PreparedVerifyingKey<E>,
     proof: &Proof<E>,
     public_inputs: &[E::Fr],
-) -> crate::Result<E::G1Affine> {
-    let inputs = public_inputs
-        .into_iter()
-        .map(|p| p.into_repr())
-        .collect::<Vec<_>>();
-    if inputs.len() > vk.link_bases.len() {
-        return Err(Error::VectorLongerThanExpected(
-            inputs.len(),
-            vk.link_bases.len(),
-        ));
-    }
-    let mut g_link = vk.link_bases[0].into_projective();
-    g_link.add_assign(VariableBaseMSM::multi_scalar_mul(
-        &vk.link_bases[1..],
-        &inputs,
-    ));
-    Ok((proof.link_d.into_projective() - g_link).into_affine())
+) -> crate::Result<()> {
+    verify_link_proof(&pvk.vk, proof)?;
+    let mut d = proof.d.into_projective();
+    d.add_assign(prepare_inputs(pvk, public_inputs)?);
+
+    verify_qap_proof(pvk, proof.a, proof.b, proof.c, d.into_affine())
 }

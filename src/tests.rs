@@ -2,15 +2,16 @@ use crate::{
     create_random_proof, generate_random_parameters, prepare_verifying_key, verify_proof,
     LinkPublicGenerators,
 };
-use ark_ec::{AffineCurve, PairingEngine, ProjectiveCurve};
-use ark_ff::{PrimeField, UniformRand};
-use ark_std::rand::{rngs::StdRng, RngCore, SeedableRng};
+use ark_ec::{PairingEngine, ProjectiveCurve};
+use ark_ff::Field;
+use ark_std::{
+    rand::{rngs::StdRng, RngCore, SeedableRng},
+    UniformRand,
+};
 
 use core::ops::MulAssign;
 
 use crate::prover::verify_commitment;
-use crate::verifier::get_commitment_to_witnesses;
-use ark_ff::Field;
 use ark_relations::r1cs::Variable;
 use ark_relations::{
     lc,
@@ -149,15 +150,12 @@ where
 {
     let mut rng = StdRng::seed_from_u64(0u64);
 
-    let num_instance_variables = 2; // There is 1 public input and there is always an instance variable as 1
-
     // Commit to both witnesses `a` and `b` in the proof
     {
         let commit_witness_count = 2;
 
-        // Generators for committing to instance variables and witnesses and 1 more for randomness (`link_v` below)
-        let link_gens =
-            get_link_public_gens(&mut rng, num_instance_variables + commit_witness_count + 1);
+        // Generators for committing to witnesses and 1 more for randomness (`link_v` below)
+        let link_gens = get_link_public_gens(&mut rng, commit_witness_count + 1);
         let circuit = MySillyCircuit { a: None, b: None };
 
         let params = generate_random_parameters::<E, _, _>(
@@ -191,18 +189,11 @@ where
             let proof = create_random_proof(circuit, v, link_v, &params, &mut rng).unwrap();
 
             // Prover verifies the openings of the commitments
-            verify_commitment(&params.vk, &proof, &[c], &[a, b], &v, &link_v).unwrap();
-            assert!(verify_commitment(&params.vk, &proof, &[c], &[a], &v, &link_v).is_err());
-            assert!(verify_commitment(&params.vk, &proof, &[a], &[a, b], &v, &link_v).is_err());
+            verify_commitment(&params.vk, &proof, 1, &[a, b], &v, &link_v).unwrap();
+            assert!(verify_commitment(&params.vk, &proof, 1, &[a], &v, &link_v).is_err());
+            assert!(verify_commitment(&params.vk, &proof, 2, &[a, b], &v, &link_v).is_err());
 
-            verify_proof(&pvk, &proof, None).unwrap();
-            assert_eq!(
-                get_commitment_to_witnesses(&params.vk, &proof, &[c]).unwrap(),
-                (link_gens.pedersen_gens[2].mul(a.into_repr())
-                    + link_gens.pedersen_gens[3].mul(b.into_repr())
-                    + link_gens.pedersen_gens[4].mul(link_v.into_repr()))
-                .into_affine()
-            );
+            verify_proof(&pvk, &proof, &[c]).unwrap();
         }
     }
 
@@ -210,9 +201,8 @@ where
     {
         let commit_witness_count = 1;
 
-        // Generators for committing to instance variables and witnesses and 1 more for randomness (`link_v` below)
-        let link_gens =
-            get_link_public_gens(&mut rng, num_instance_variables + commit_witness_count + 1);
+        // Generators for committing to witnesses and 1 more for randomness (`link_v` below)
+        let link_gens = get_link_public_gens(&mut rng, commit_witness_count + 1);
 
         let circuit = MySillyCircuit { a: None, b: None };
 
@@ -247,18 +237,11 @@ where
             let proof = create_random_proof(circuit, v, link_v, &params, &mut rng).unwrap();
 
             // Prover verifies the openings of the commitments
-            verify_commitment(&params.vk, &proof, &[c], &[a], &v, &link_v).unwrap();
-            assert!(verify_commitment(&params.vk, &proof, &[c], &[a, b], &v, &link_v).is_err());
-            assert!(verify_commitment(&params.vk, &proof, &[b], &[a], &v, &link_v).is_err());
+            verify_commitment(&params.vk, &proof, 1, &[a], &v, &link_v).unwrap();
+            assert!(verify_commitment(&params.vk, &proof, 1, &[a, b], &v, &link_v).is_err());
+            assert!(verify_commitment(&params.vk, &proof, 2, &[a], &v, &link_v).is_err());
 
-            verify_proof(&pvk, &proof, None).unwrap();
-
-            assert_eq!(
-                get_commitment_to_witnesses(&params.vk, &proof, &[c]).unwrap(),
-                (link_gens.pedersen_gens[2].mul(a.into_repr())
-                    + link_gens.pedersen_gens[3].mul(link_v.into_repr()))
-                .into_affine()
-            );
+            verify_proof(&pvk, &proof, &[c]).unwrap();
         }
     }
 }
@@ -269,14 +252,11 @@ where
 {
     let mut rng = StdRng::seed_from_u64(0u64);
 
-    let num_instance_variables = 2; // There is 1 public input and there is always an instance variable as 1
-
     // Commit to all 4 witnesses `a`, `b`, `c` and `d` in the proof
     let commit_witness_count = 4;
 
-    // Generators for committing to instance variables and witnesses and 1 more for randomness (`link_v` below)
-    let link_gens =
-        get_link_public_gens(&mut rng, num_instance_variables + commit_witness_count + 1);
+    // Generators for committing to witnesses and 1 more for randomness (`link_v` below)
+    let link_gens = get_link_public_gens(&mut rng, commit_witness_count + 1);
 
     let params = generate_random_parameters::<E, _, _>(
         MyLessSillyCircuit {
@@ -324,21 +304,11 @@ where
         let proof = create_random_proof(circuit, v, link_v, &params, &mut rng).unwrap();
 
         // Prover verifies the openings of the commitments
-        verify_commitment(&params.vk, &proof, &[y], &[a, b, c, d], &v, &link_v).unwrap();
-        assert!(verify_commitment(&params.vk, &proof, &[a], &[a, b, c, d], &v, &link_v).is_err());
-        assert!(verify_commitment(&params.vk, &proof, &[y], &[a, b, c], &v, &link_v).is_err());
+        verify_commitment(&params.vk, &proof, 1, &[a, b, c, d], &v, &link_v).unwrap();
+        assert!(verify_commitment(&params.vk, &proof, 0, &[a, b, c, d], &v, &link_v).is_err());
+        assert!(verify_commitment(&params.vk, &proof, 1, &[a, b, c], &v, &link_v).is_err());
 
-        verify_proof(&pvk, &proof, None).unwrap();
-
-        assert_eq!(
-            get_commitment_to_witnesses(&params.vk, &proof, &[y]).unwrap(),
-            (link_gens.pedersen_gens[2].mul(a.into_repr())
-                + link_gens.pedersen_gens[3].mul(b.into_repr())
-                + link_gens.pedersen_gens[4].mul(c.into_repr())
-                + link_gens.pedersen_gens[5].mul(d.into_repr())
-                + link_gens.pedersen_gens[6].mul(link_v.into_repr()))
-            .into_affine()
-        );
+        verify_proof(&pvk, &proof, &[y]).unwrap();
     }
 }
 
@@ -348,14 +318,11 @@ where
 {
     let mut rng = StdRng::seed_from_u64(0u64);
 
-    let num_instance_variables = 3; // There are 2 public inputs and there is always an instance variable as 1
-
     // Commit to all 4 witnesses `a`, `b`, `c` and `d` in the proof
     let commit_witness_count = 4;
 
-    // Generators for committing to instance variables and witnesses and 1 more for randomness (`link_v` below)
-    let link_gens =
-        get_link_public_gens(&mut rng, num_instance_variables + commit_witness_count + 1);
+    // Generators for committing to witnesses and 1 more for randomness (`link_v` below)
+    let link_gens = get_link_public_gens(&mut rng, commit_witness_count + 1);
 
     let params = generate_random_parameters::<E, _, _>(
         MyLessSillyCircuit1 {
@@ -402,23 +369,11 @@ where
 
         let proof = create_random_proof(circuit, v, link_v, &params, &mut rng).unwrap();
         // Prover verifies the openings of the commitments
-        verify_commitment(&params.vk, &proof, &[e, f], &[a, b, c, d], &v, &link_v).unwrap();
-        assert!(
-            verify_commitment(&params.vk, &proof, &[a, b], &[a, b, c, d], &v, &link_v).is_err()
-        );
-        assert!(verify_commitment(&params.vk, &proof, &[e, f], &[a, b], &v, &link_v).is_err());
+        verify_commitment(&params.vk, &proof, 2, &[a, b, c, d], &v, &link_v).unwrap();
+        assert!(verify_commitment(&params.vk, &proof, 1, &[a, b, c, d], &v, &link_v).is_err());
+        assert!(verify_commitment(&params.vk, &proof, 2, &[a, b], &v, &link_v).is_err());
 
-        verify_proof(&pvk, &proof, None).unwrap();
-
-        assert_eq!(
-            get_commitment_to_witnesses(&params.vk, &proof, &[e, f]).unwrap(),
-            (link_gens.pedersen_gens[3].mul(a.into_repr())
-                + link_gens.pedersen_gens[4].mul(b.into_repr())
-                + link_gens.pedersen_gens[5].mul(c.into_repr())
-                + link_gens.pedersen_gens[6].mul(d.into_repr())
-                + link_gens.pedersen_gens[7].mul(link_v.into_repr()))
-            .into_affine()
-        );
+        verify_proof(&pvk, &proof, &[e, f]).unwrap();
     }
 }
 

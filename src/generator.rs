@@ -128,8 +128,7 @@ where
     let num_instance_variables = cs.num_instance_variables();
     assert!(cs.num_witness_variables() >= commit_witness_count);
 
-    // The commitment will commit to all instance variables (public variables + 1), and `commit_witness_count` witness variables
-    let total_to_commit = num_instance_variables + commit_witness_count;
+    let n = num_instance_variables + commit_witness_count;
 
     let reduction_time = start_timer!(|| "R1CS to QAP Instance Map with Evaluation");
     let (a, b, c, zt, qap_num_variables, m_raw) =
@@ -150,9 +149,9 @@ where
     let gamma_inverse = gamma.inverse().ok_or(SynthesisError::UnexpectedIdentity)?;
     let delta_inverse = delta.inverse().ok_or(SynthesisError::UnexpectedIdentity)?;
 
-    let gamma_abc = cfg_iter!(a[..total_to_commit])
-        .zip(&b[..total_to_commit])
-        .zip(&c[..total_to_commit])
+    let gamma_abc = cfg_iter!(a[..n])
+        .zip(&b[..n])
+        .zip(&c[..n])
         .map(|((a, b), c)| (beta * a + &(alpha * b) + c) * &gamma_inverse)
         .collect::<Vec<_>>();
 
@@ -245,7 +244,7 @@ where
         scalar_bits,
         g1_window,
         &g1_table,
-        &l[total_to_commit..],
+        &l[n..],
     );
     drop(l);
     end_timer!(l_time);
@@ -270,7 +269,7 @@ where
 
     // Setup public params for the Subspace Snark
     let link_rows = 2; // we're comparing two commitments, proof.d and proof.link_d
-    let link_cols = gamma_abc_g1.len() + 2; // we have len inputs and 1 hiding factor per row
+    let link_cols = commit_witness_count + 2; // we have `commit_witness_count` witnesses and 1 hiding factor per row
     let link_pp = PP::<E::G1Affine, E::G2Affine> {
         l: link_rows,
         t: link_cols,
@@ -284,10 +283,15 @@ where
 
     let mut link_m = SparseMatrix::<E::G1Affine>::new(link_rows, link_cols);
     link_m.insert_row_slice(0, 0, link_gens.pedersen_gens.clone())?;
-    link_m.insert_row_slice(1, 0, gamma_abc_g1_affine.clone())?;
     link_m.insert_row_slice(
         1,
-        gamma_abc_g1.len() + 1,
+        0,
+        gamma_abc_g1_affine[num_instance_variables..num_instance_variables + commit_witness_count]
+            .to_vec(),
+    )?;
+    link_m.insert_row_slice(
+        1,
+        commit_witness_count + 1,
         vec![eta_gamma_inv_g1_affine.clone()],
     )?;
 

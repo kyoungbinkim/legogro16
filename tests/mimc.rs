@@ -19,8 +19,8 @@ use std::time::{Duration, Instant};
 // Bring in some tools for using pairing-friendly curves
 // We're going to use the BLS12-377 pairing-friendly elliptic curve.
 use ark_bls12_377::{Bls12_377, Fr};
-use ark_ec::{AffineCurve, ProjectiveCurve};
-use ark_ff::{Field, PrimeField};
+use ark_ec::ProjectiveCurve;
+use ark_ff::Field;
 
 // We'll use these interfaces to construct our circuit.
 use ark_relations::{
@@ -152,7 +152,7 @@ fn test_mimc_legogroth16() {
 
     use legogroth16::{
         create_random_proof, data_structures::LinkPublicGenerators, generate_random_parameters,
-        get_commitment_to_witnesses, prepare_verifying_key, verify_proof,
+        prepare_verifying_key, verify_proof,
     };
 
     // This may not be cryptographically safe, use
@@ -164,8 +164,8 @@ fn test_mimc_legogroth16() {
 
     println!("Creating parameters...");
 
-    // Need 5 bases, 1 for public input, 2 for witnesses xl and xr, 1 for instance variable 1 and 1 for randomness (link_v)
-    let pedersen_gens = (0..5)
+    // Need 3 bases, 2 for witnesses xl and xr and 1 for randomness (link_v)
+    let pedersen_gens = (0..3)
         .map(|_| ark_bls12_377::G1Projective::rand(&mut rng).into_affine())
         .collect::<Vec<_>>();
     let g1 = ark_bls12_377::G1Projective::rand(&mut rng).into_affine();
@@ -227,19 +227,12 @@ fn test_mimc_legogroth16() {
             let proof = create_random_proof(c, v, link_v, &params, &mut rng).unwrap();
             total_proving += start.elapsed();
 
-            verify_commitment(&params.vk, &proof, &[image], &[xl, xr], &v, &link_v).unwrap();
+            verify_commitment(&params.vk, &proof, 1, &[xl, xr], &v, &link_v).unwrap();
 
             let start = Instant::now();
-            verify_proof(&pvk, &proof, None).unwrap();
+            verify_proof(&pvk, &proof, &[image]).unwrap();
             total_verifying += start.elapsed();
 
-            assert_eq!(
-                get_commitment_to_witnesses(&params.vk, &proof, &[image]).unwrap(),
-                (link_gens.pedersen_gens[2].mul(xl.into_repr())
-                    + link_gens.pedersen_gens[3].mul(xr.into_repr())
-                    + link_gens.pedersen_gens[4].mul(link_v.into_repr()))
-                .into_affine()
-            );
             // proof.write(&mut proof_vec).unwrap();
         }
     }
