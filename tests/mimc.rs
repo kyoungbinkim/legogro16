@@ -29,7 +29,10 @@ use ark_relations::{
 };
 
 use ark_std::rand::{rngs::StdRng, SeedableRng};
-use legogroth16::prover::verify_commitment;
+use legogroth16::prover::verify_commitments;
+use legogroth16::{
+    create_random_proof, generate_random_parameters, verify_proof, verify_witness_commitment,
+};
 
 const MIMC_ROUNDS: usize = 322;
 
@@ -65,6 +68,7 @@ fn mimc<F: Field>(mut xl: F, mut xr: F, constants: &[F]) -> F {
 
 /// This is our demo circuit for proving knowledge of the
 /// preimage of a MiMC hash invocation.
+#[derive(Clone)]
 struct MiMCDemo<'a, F: Field> {
     xl: Option<F>,
     xr: Option<F>,
@@ -151,8 +155,8 @@ fn test_mimc_legogroth16() {
     // This proof has a commitment to both left and right inputs
 
     use legogroth16::{
-        create_random_proof, data_structures::LinkPublicGenerators, generate_random_parameters,
-        prepare_verifying_key, verify_proof,
+        create_random_proof_incl_cp_link, data_structures::LinkPublicGenerators,
+        generate_random_parameters_incl_cp_link, prepare_verifying_key, verify_proof_incl_cp_link,
     };
 
     // This may not be cryptographically safe, use
@@ -176,38 +180,40 @@ fn test_mimc_legogroth16() {
         g2,
     };
 
-    // Create parameters for our circuit
-    let params = {
-        let c = MiMCDemo::<Fr> {
-            xl: None,
-            xr: None,
-            constants: &constants,
-        };
-
-        generate_random_parameters::<Bls12_377, _, _>(c, link_gens.clone(), 2, &mut rng).unwrap()
+    let c = MiMCDemo::<Fr> {
+        xl: None,
+        xr: None,
+        constants: &constants,
     };
 
+    // Create parameters for our circuit
+    let params_link = generate_random_parameters_incl_cp_link::<Bls12_377, _, _>(
+        c.clone(),
+        link_gens.clone(),
+        2,
+        &mut rng,
+    )
+    .unwrap();
+    let params = generate_random_parameters::<Bls12_377, _, _>(c, 2, &mut rng).unwrap();
+
     // Prepare the verification key (for proof verification)
+    let pvk_link = prepare_verifying_key(&params_link.vk.groth16_vk);
     let pvk = prepare_verifying_key(&params.vk);
 
     println!("Creating proofs...");
 
     // Let's benchmark stuff!
     const SAMPLES: u32 = 50;
+    let mut total_proving_inc_link = Duration::new(0, 0);
+    let mut total_verifying_inc_link = Duration::new(0, 0);
     let mut total_proving = Duration::new(0, 0);
     let mut total_verifying = Duration::new(0, 0);
-
-    // Just a place to put the proof data, so we can
-    // benchmark deserialization.
-    // let mut proof_vec = vec![];
 
     for _ in 0..SAMPLES {
         // Generate a random preimage and compute the image
         let xl = rng.gen();
         let xr = rng.gen();
         let image = mimc(xl, xr, &constants);
-
-        // proof_vec.truncate(0);
 
         {
             // Create an instance of our circuit (with the
@@ -222,12 +228,24 @@ fn test_mimc_legogroth16() {
             let v = Fr::rand(&mut rng);
             let link_v = Fr::rand(&mut rng);
 
-            let start = Instant::now();
             // Create a LegoGro16 proof with our parameters.
-            let proof = create_random_proof(c, v, link_v, &params, &mut rng).unwrap();
+
+            let start = Instant::now();
+            let proof_link =
+                create_random_proof_incl_cp_link(c.clone(), v, link_v, &params_link, &mut rng)
+                    .unwrap();
+            total_proving_inc_link += start.elapsed();
+
+            let start = Instant::now();
+            let proof = create_random_proof(c, v, &params, &mut rng).unwrap();
             total_proving += start.elapsed();
 
-            verify_commitment(&params.vk, &proof, 1, &[xl, xr], &v, &link_v).unwrap();
+            verify_commitments(&params_link.vk, &proof_link, 1, &[xl, xr], &v, &link_v).unwrap();
+            verify_witness_commitment(&params.vk, &proof, 1, &[xl, xr], &v).unwrap();
+
+            let start = Instant::now();
+            verify_proof_incl_cp_link(&pvk_link, &params_link.vk, &proof_link, &[image]).unwrap();
+            total_verifying_inc_link += start.elapsed();
 
             let start = Instant::now();
             verify_proof(&pvk, &proof, &[image]).unwrap();
@@ -236,6 +254,14 @@ fn test_mimc_legogroth16() {
             // proof.write(&mut proof_vec).unwrap();
         }
     }
+    let proving_avg_inc_link = total_proving_inc_link / SAMPLES;
+    let proving_avg_inc_link = proving_avg_inc_link.subsec_nanos() as f64 / 1_000_000_000f64
+        + (proving_avg_inc_link.as_secs() as f64);
+
+    let verifying_avg_inc_link = total_verifying_inc_link / SAMPLES;
+    let verifying_avg_inc_link = verifying_avg_inc_link.subsec_nanos() as f64 / 1_000_000_000f64
+        + (verifying_avg_inc_link.as_secs() as f64);
+
     let proving_avg = total_proving / SAMPLES;
     let proving_avg =
         proving_avg.subsec_nanos() as f64 / 1_000_000_000f64 + (proving_avg.as_secs() as f64);
@@ -244,6 +270,14 @@ fn test_mimc_legogroth16() {
     let verifying_avg =
         verifying_avg.subsec_nanos() as f64 / 1_000_000_000f64 + (verifying_avg.as_secs() as f64);
 
+    println!(
+        "Average proving time including link proof: {:?} seconds",
+        proving_avg_inc_link
+    );
+    println!(
+        "Average verifying time including link proof: {:?} seconds",
+        verifying_avg_inc_link
+    );
     println!("Average proving time: {:?} seconds", proving_avg);
     println!("Average verifying time: {:?} seconds", verifying_avg);
 }

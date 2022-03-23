@@ -7,7 +7,7 @@ use ark_std::{
     vec::Vec,
 };
 
-/// A proof in the Groth16 SNARK.
+/// A proof in the Groth16 SNARK
 #[derive(Clone, Debug, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct Proof<E: PairingEngine> {
     /// The `A` element in `G1`.
@@ -18,6 +18,12 @@ pub struct Proof<E: PairingEngine> {
     pub c: E::G1Affine,
     /// The `D` element in `G1`. Commits to a subset of private inputs of the circuit
     pub d: E::G1Affine,
+}
+
+/// A proof in the Groth16 SNARK with CP_link proof
+#[derive(Clone, Debug, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
+pub struct ProofWithLink<E: PairingEngine> {
+    pub groth16_proof: Proof<E>,
     /// cp_{link}
     pub link_d: E::G1Affine,
     /// proof of commitment opening equality between `cp_{link}` and `d`
@@ -30,9 +36,7 @@ impl<E: PairingEngine> ToBytes for Proof<E> {
         self.a.write(&mut writer)?;
         self.b.write(&mut writer)?;
         self.c.write(&mut writer)?;
-        self.d.write(&mut writer)?;
-        self.link_d.write(&mut writer)?;
-        self.link_pi.write(&mut writer)
+        self.d.write(&mut writer)
     }
 }
 
@@ -43,6 +47,23 @@ impl<E: PairingEngine> Default for Proof<E> {
             b: E::G2Affine::default(),
             c: E::G1Affine::default(),
             d: E::G1Affine::default(),
+        }
+    }
+}
+
+impl<E: PairingEngine> ToBytes for ProofWithLink<E> {
+    #[inline]
+    fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        self.groth16_proof.write(&mut writer)?;
+        self.link_d.write(&mut writer)?;
+        self.link_pi.write(&mut writer)
+    }
+}
+
+impl<E: PairingEngine> Default for ProofWithLink<E> {
+    fn default() -> Self {
+        Self {
+            groth16_proof: Proof::default(),
             link_pi: E::G1Affine::default(),
             link_d: E::G1Affine::default(),
         }
@@ -67,6 +88,12 @@ pub struct VerifyingKey<E: PairingEngine> {
     pub gamma_abc_g1: Vec<E::G1Affine>,
     /// The element `eta*gamma^-1 * G` in `E::G1`.
     pub eta_gamma_inv_g1: E::G1Affine,
+}
+
+/// A verification key in the Groth16 SNARK with CP_link verification parameters
+#[derive(Clone, Debug, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
+pub struct VerifyingKeyWithLink<E: PairingEngine> {
+    pub groth16_vk: VerifyingKey<E>,
     /// Public parameters of the Subspace Snark
     pub link_pp: PP<E::G1Affine, E::G2Affine>,
     /// Commitment key of the link commitment cp_link
@@ -84,14 +111,7 @@ impl<E: PairingEngine> ToBytes for VerifyingKey<E> {
         for q in &self.gamma_abc_g1 {
             q.write(&mut writer)?;
         }
-        self.eta_gamma_inv_g1.write(&mut writer)?;
-        self.link_pp.write(&mut writer)?;
-        for q in &self.link_bases {
-            q.write(&mut writer)?;
-        }
-        self.link_vk.write(&mut writer)?;
-
-        Ok(())
+        self.eta_gamma_inv_g1.write(&mut writer)
     }
 }
 
@@ -104,6 +124,25 @@ impl<E: PairingEngine> Default for VerifyingKey<E> {
             delta_g2: E::G2Affine::default(),
             gamma_abc_g1: Vec::new(),
             eta_gamma_inv_g1: E::G1Affine::default(),
+        }
+    }
+}
+
+impl<E: PairingEngine> ToBytes for VerifyingKeyWithLink<E> {
+    fn write<W: Write>(&self, mut writer: W) -> IoResult<()> {
+        self.groth16_vk.write(&mut writer)?;
+        self.link_pp.write(&mut writer)?;
+        for q in &self.link_bases {
+            q.write(&mut writer)?;
+        }
+        self.link_vk.write(&mut writer)
+    }
+}
+
+impl<E: PairingEngine> Default for VerifyingKeyWithLink<E> {
+    fn default() -> Self {
+        Self {
+            groth16_vk: VerifyingKey::default(),
             link_pp: PP::<E::G1Affine, E::G2Affine>::default(),
             link_bases: Vec::new(),
             link_vk: VK::<E::G2Affine>::default(),
@@ -131,9 +170,9 @@ impl<E: PairingEngine> From<PreparedVerifyingKey<E>> for VerifyingKey<E> {
     }
 }
 
-impl<E: PairingEngine> From<VerifyingKey<E>> for PreparedVerifyingKey<E> {
-    fn from(other: VerifyingKey<E>) -> Self {
-        crate::prepare_verifying_key(&other)
+impl<E: PairingEngine> From<&VerifyingKey<E>> for PreparedVerifyingKey<E> {
+    fn from(other: &VerifyingKey<E>) -> Self {
+        crate::prepare_verifying_key(other)
     }
 }
 
@@ -161,11 +200,8 @@ impl<E: PairingEngine> ToBytes for PreparedVerifyingKey<E> {
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 
-/// The prover key for for the Groth16 zkSNARK.
 #[derive(Clone, Debug, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
-pub struct ProvingKey<E: PairingEngine> {
-    /// The underlying verification key.
-    pub vk: VerifyingKey<E>,
+pub struct ProvingKeyCommon<E: PairingEngine> {
     /// The element `beta * G` in `E::G1`.
     pub beta_g1: E::G1Affine,
     /// The element `delta * G` in `E::G1`.
@@ -184,6 +220,22 @@ pub struct ProvingKey<E: PairingEngine> {
     pub l_query: Vec<E::G1Affine>,
     /// No of witness to commit
     pub commit_witness_count: usize,
+}
+
+/// The prover key for for the Groth16 zkSNARK.
+#[derive(Clone, Debug, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
+pub struct ProvingKey<E: PairingEngine> {
+    /// The underlying verification key.
+    pub vk: VerifyingKey<E>,
+    pub common: ProvingKeyCommon<E>,
+}
+
+/// The prover key for for the Groth16 zkSNARK.
+#[derive(Clone, Debug, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
+pub struct ProvingKeyWithLink<E: PairingEngine> {
+    /// The underlying verification key.
+    pub vk: VerifyingKeyWithLink<E>,
+    pub common: ProvingKeyCommon<E>,
     /// Evaluation key of cp_{link}
     pub link_ek: EK<E::G1Affine>,
 }

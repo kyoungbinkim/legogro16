@@ -2,11 +2,12 @@ use crate::link::{PESubspaceSnark, SubspaceSnark};
 use ark_ec::{AffineCurve, PairingEngine, ProjectiveCurve};
 use ark_ff::PrimeField;
 
-use super::{PreparedVerifyingKey, Proof, VerifyingKey};
+use super::{PreparedVerifyingKey, ProofWithLink, VerifyingKeyWithLink};
 
 use ark_relations::r1cs::SynthesisError;
 
 use crate::error::Error;
+use crate::{Proof, VerifyingKey};
 use ark_std::vec;
 use ark_std::vec::Vec;
 use core::ops::{AddAssign, Neg};
@@ -41,10 +42,13 @@ pub fn prepare_inputs<E: PairingEngine>(
 
 /// Verify the proof of the Subspace Snark on the equality of openings of cp_link and proof.d
 pub fn verify_link_proof<E: PairingEngine>(
-    vk: &VerifyingKey<E>,
-    proof: &Proof<E>,
+    vk: &VerifyingKeyWithLink<E>,
+    proof: &ProofWithLink<E>,
 ) -> crate::Result<()> {
-    let commitments = vec![proof.link_d.into_projective(), proof.d.into_projective()];
+    let commitments = vec![
+        proof.link_d.into_projective(),
+        proof.groth16_proof.d.into_projective(),
+    ];
     PESubspaceSnark::<E>::verify(
         &vk.link_pp,
         &vk.link_vk,
@@ -87,9 +91,19 @@ pub fn verify_proof<E: PairingEngine>(
     proof: &Proof<E>,
     public_inputs: &[E::Fr],
 ) -> crate::Result<()> {
-    verify_link_proof(&pvk.vk, proof)?;
     let mut d = proof.d.into_projective();
     d.add_assign(prepare_inputs(pvk, public_inputs)?);
 
     verify_qap_proof(pvk, proof.a, proof.b, proof.c, d.into_affine())
+}
+
+/// Verify a LegoGroth16 proof `proof` against the prepared verification key `pvk`
+pub fn verify_proof_incl_cp_link<E: PairingEngine>(
+    pvk: &PreparedVerifyingKey<E>,
+    vk: &VerifyingKeyWithLink<E>,
+    proof: &ProofWithLink<E>,
+    public_inputs: &[E::Fr],
+) -> crate::Result<()> {
+    verify_link_proof(vk, proof)?;
+    verify_proof(pvk, &proof.groth16_proof, public_inputs)
 }

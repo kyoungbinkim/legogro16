@@ -1,7 +1,8 @@
 use crate::{
     link::{PESubspaceSnark, SparseMatrix, SubspaceSnark, PP},
     r1cs_to_qap::LibsnarkReduction,
-    LinkPublicGenerators, ProvingKey, Vec, VerifyingKey,
+    LinkPublicGenerators, ProvingKey, ProvingKeyCommon, ProvingKeyWithLink, Vec, VerifyingKey,
+    VerifyingKeyWithLink,
 };
 use ark_ec::{msm::FixedBaseMSM, PairingEngine, ProjectiveCurve};
 use ark_ff::{Field, PrimeField, UniformRand, Zero};
@@ -15,12 +16,36 @@ use crate::r1cs_to_qap::R1CStoQAP;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
+// QUESTION: Does making link (link keys, link proof, etc) optional reduce the security? We don't need the
+// link as of now, only the commitment to the witness is needed in the proof.
+
+#[inline]
+/// Generates a random common reference string for
+/// a circuit.
+pub fn generate_random_parameters_incl_cp_link<E, C, R>(
+    circuit: C,
+    link_gens: LinkPublicGenerators<E>,
+    commit_witness_count: usize,
+    rng: &mut R,
+) -> crate::Result<ProvingKeyWithLink<E>>
+where
+    E: PairingEngine,
+    C: ConstraintSynthesizer<E::Fr>,
+    R: Rng,
+{
+    generate_random_parameters_incl_cp_link_with_reduction::<E, C, R, LibsnarkReduction>(
+        circuit,
+        link_gens,
+        commit_witness_count,
+        rng,
+    )
+}
+
 #[inline]
 /// Generates a random common reference string for
 /// a circuit.
 pub fn generate_random_parameters<E, C, R>(
     circuit: C,
-    link_gens: LinkPublicGenerators<E>,
     commit_witness_count: usize,
     rng: &mut R,
 ) -> crate::Result<ProvingKey<E>>
@@ -31,7 +56,6 @@ where
 {
     generate_random_parameters_with_reduction::<E, C, R, LibsnarkReduction>(
         circuit,
-        link_gens,
         commit_witness_count,
         rng,
     )
@@ -45,7 +69,6 @@ where
 #[inline]
 pub fn generate_random_parameters_with_reduction<E, C, R, QAP>(
     circuit: C,
-    link_gens: LinkPublicGenerators<E>,
     commit_witness_count: usize,
     rng: &mut R,
 ) -> crate::Result<ProvingKey<E>>
@@ -55,16 +78,45 @@ where
     R: Rng,
     QAP: R1CStoQAP,
 {
-    let alpha = E::Fr::rand(rng);
-    let beta = E::Fr::rand(rng);
-    let gamma = E::Fr::rand(rng);
-    let delta = E::Fr::rand(rng);
-    let eta = E::Fr::rand(rng);
-
-    let g1_generator = E::G1Projective::rand(rng);
-    let g2_generator = E::G2Projective::rand(rng);
+    let (alpha, beta, gamma, delta, eta, g1_generator, g2_generator) =
+        generate_randomness::<E, R>(rng);
 
     generate_parameters_with_qap::<E, C, R, QAP>(
+        circuit,
+        alpha,
+        beta,
+        gamma,
+        delta,
+        eta,
+        g1_generator,
+        g2_generator,
+        commit_witness_count,
+        rng,
+    )
+}
+
+/// Generates a random common reference string for
+/// a circuit.
+/// `pedersen_bases` are the bases (commitment key) for link (Pedersen) commitment to the first
+/// `commit_witness_count` witness variables allocated in the circuit. The commitment also commits
+/// to the public variables
+#[inline]
+pub fn generate_random_parameters_incl_cp_link_with_reduction<E, C, R, QAP>(
+    circuit: C,
+    link_gens: LinkPublicGenerators<E>,
+    commit_witness_count: usize,
+    rng: &mut R,
+) -> crate::Result<ProvingKeyWithLink<E>>
+where
+    E: PairingEngine,
+    C: ConstraintSynthesizer<E::Fr>,
+    R: Rng,
+    QAP: R1CStoQAP,
+{
+    let (alpha, beta, gamma, delta, eta, g1_generator, g2_generator) =
+        generate_randomness::<E, R>(rng);
+
+    generate_parameters_incl_cp_link_with_qap::<E, C, R, QAP>(
         circuit,
         alpha,
         beta,
@@ -80,7 +132,8 @@ where
 }
 
 /// Create parameters for a circuit, given some toxic waste, R1CS to QAP calculator and group generators
-pub fn generate_parameters_with_qap<E, C, R, QAP>(
+#[inline]
+pub fn generate_parameters_incl_cp_link_with_qap<E, C, R, QAP>(
     circuit: C,
     alpha: E::Fr,
     beta: E::Fr,
@@ -92,7 +145,117 @@ pub fn generate_parameters_with_qap<E, C, R, QAP>(
     link_gens: LinkPublicGenerators<E>,
     commit_witness_count: usize,
     rng: &mut R,
+) -> crate::Result<ProvingKeyWithLink<E>>
+where
+    E: PairingEngine,
+    C: ConstraintSynthesizer<E::Fr>,
+    R: Rng,
+    QAP: R1CStoQAP,
+{
+    let (groth16_pk, num_instance_variables) =
+        generate_parameters_and_extra_info_with_qap::<E, C, R, QAP>(
+            circuit,
+            alpha,
+            beta,
+            gamma,
+            delta,
+            eta,
+            g1_generator,
+            g2_generator,
+            commit_witness_count,
+            rng,
+        )?;
+
+    // Setup public params for the Subspace Snark
+    let link_rows = 2; // we're comparing two commitments, proof.d and proof.link_d
+    let link_cols = commit_witness_count + 2; // we have `commit_witness_count` witnesses and 1 hiding factor per row
+    let link_pp = PP::<E::G1Affine, E::G2Affine> {
+        l: link_rows,
+        t: link_cols,
+        g1: link_gens.g1,
+        g2: link_gens.g2,
+    };
+
+    let mut link_m = SparseMatrix::<E::G1Affine>::new(link_rows, link_cols);
+    link_m.insert_row_slice(0, 0, link_gens.pedersen_gens.clone())?;
+    link_m.insert_row_slice(
+        1,
+        0,
+        groth16_pk.vk.gamma_abc_g1
+            [num_instance_variables..num_instance_variables + commit_witness_count]
+            .to_vec(),
+    )?;
+    link_m.insert_row_slice(
+        1,
+        commit_witness_count + 1,
+        vec![groth16_pk.vk.eta_gamma_inv_g1],
+    )?;
+
+    let (link_ek, link_vk) = PESubspaceSnark::<E>::keygen(rng, &link_pp, &link_m)?;
+
+    let vk = VerifyingKeyWithLink::<E> {
+        groth16_vk: groth16_pk.vk,
+        link_pp,
+        link_bases: link_gens.pedersen_gens,
+        link_vk,
+    };
+
+    Ok(ProvingKeyWithLink {
+        vk,
+        common: groth16_pk.common,
+        link_ek,
+    })
+}
+
+/// Create parameters for a circuit, given some toxic waste, R1CS to QAP calculator and group generators
+#[inline]
+pub fn generate_parameters_with_qap<E, C, R, QAP>(
+    circuit: C,
+    alpha: E::Fr,
+    beta: E::Fr,
+    gamma: E::Fr,
+    delta: E::Fr,
+    eta: E::Fr,
+    g1_generator: E::G1Projective,
+    g2_generator: E::G2Projective,
+    commit_witness_count: usize,
+    rng: &mut R,
 ) -> crate::Result<ProvingKey<E>>
+where
+    E: PairingEngine,
+    C: ConstraintSynthesizer<E::Fr>,
+    R: Rng,
+    QAP: R1CStoQAP,
+{
+    let (pk, _) = generate_parameters_and_extra_info_with_qap::<E, C, R, QAP>(
+        circuit,
+        alpha,
+        beta,
+        gamma,
+        delta,
+        eta,
+        g1_generator,
+        g2_generator,
+        commit_witness_count,
+        rng,
+    )?;
+    Ok(pk)
+}
+
+/// Create parameters for a circuit, given some toxic waste, R1CS to QAP calculator and group generators
+#[inline]
+fn generate_parameters_and_extra_info_with_qap<E, C, R, QAP>(
+    circuit: C,
+    alpha: E::Fr,
+    beta: E::Fr,
+    gamma: E::Fr,
+    delta: E::Fr,
+    eta: E::Fr,
+    g1_generator: E::G1Projective,
+    g2_generator: E::G2Projective,
+    commit_witness_count: usize,
+    rng: &mut R,
+) -> crate::Result<(ProvingKey<E>, usize)>
 where
     E: PairingEngine,
     C: ConstraintSynthesizer<E::Fr>,
@@ -154,20 +317,6 @@ where
         .zip(&c[..n])
         .map(|((a, b), c)| (beta * a + &(alpha * b) + c) * &gamma_inverse)
         .collect::<Vec<_>>();
-
-    // println!("abc");
-    // println!("a:");
-    // for i in a[..num_instance_variables].iter() {
-    //     println!("{:?}", i.into_repr());
-    // }
-    // println!("b:");
-    // for i in b[..num_instance_variables].iter() {
-    //     println!("{:?}", i.into_repr());
-    // }
-    // println!("c:");
-    // for i in c[..num_instance_variables].iter() {
-    //     println!("{:?}", i.into_repr());
-    // }
 
     let l = cfg_iter!(a)
         .zip(&b)
@@ -267,35 +416,8 @@ where
 
     let eta_gamma_inv_g1 = g1_generator.mul((eta * &gamma_inverse).into_repr());
 
-    // Setup public params for the Subspace Snark
-    let link_rows = 2; // we're comparing two commitments, proof.d and proof.link_d
-    let link_cols = commit_witness_count + 2; // we have `commit_witness_count` witnesses and 1 hiding factor per row
-    let link_pp = PP::<E::G1Affine, E::G2Affine> {
-        l: link_rows,
-        t: link_cols,
-        g1: link_gens.g1,
-        g2: link_gens.g2,
-    };
-    // println!("gamma_abc_g1 len={:?}", gamma_abc_g1.len());
-
     let gamma_abc_g1_affine = E::G1Projective::batch_normalization_into_affine(&gamma_abc_g1);
     let eta_gamma_inv_g1_affine = eta_gamma_inv_g1.into_affine();
-
-    let mut link_m = SparseMatrix::<E::G1Affine>::new(link_rows, link_cols);
-    link_m.insert_row_slice(0, 0, link_gens.pedersen_gens.clone())?;
-    link_m.insert_row_slice(
-        1,
-        0,
-        gamma_abc_g1_affine[num_instance_variables..num_instance_variables + commit_witness_count]
-            .to_vec(),
-    )?;
-    link_m.insert_row_slice(
-        1,
-        commit_witness_count + 1,
-        vec![eta_gamma_inv_g1_affine.clone()],
-    )?;
-
-    let (link_ek, link_vk) = PESubspaceSnark::<E>::keygen(rng, &link_pp, &link_m)?;
 
     let vk = VerifyingKey::<E> {
         alpha_g1: alpha_g1.into_affine(),
@@ -304,9 +426,6 @@ where
         delta_g2: delta_g2.into_affine(),
         gamma_abc_g1: gamma_abc_g1_affine,
         eta_gamma_inv_g1: eta_gamma_inv_g1_affine,
-        link_pp,
-        link_bases: link_gens.pedersen_gens,
-        link_vk,
     };
 
     let batch_normalization_time = start_timer!(|| "Convert proving key elements to affine");
@@ -320,8 +439,7 @@ where
 
     let eta_delta_inv_g1 = g1_generator.mul((eta * &delta_inverse).into_repr());
 
-    Ok(ProvingKey {
-        vk,
+    let common = ProvingKeyCommon {
         beta_g1: beta_g1.into_affine(),
         delta_g1: delta_g1.into_affine(),
         eta_delta_inv_g1: eta_delta_inv_g1.into_affine(),
@@ -331,6 +449,33 @@ where
         h_query,
         l_query,
         commit_witness_count,
-        link_ek,
-    })
+    };
+    Ok((ProvingKey { vk, common }, num_instance_variables))
+}
+
+#[inline]
+fn generate_randomness<E, R>(
+    rng: &mut R,
+) -> (
+    E::Fr,
+    E::Fr,
+    E::Fr,
+    E::Fr,
+    E::Fr,
+    E::G1Projective,
+    E::G2Projective,
+)
+where
+    E: PairingEngine,
+    R: Rng,
+{
+    let alpha = E::Fr::rand(rng);
+    let beta = E::Fr::rand(rng);
+    let gamma = E::Fr::rand(rng);
+    let delta = E::Fr::rand(rng);
+    let eta = E::Fr::rand(rng);
+
+    let g1_generator = E::G1Projective::rand(rng);
+    let g2_generator = E::G2Projective::rand(rng);
+    (alpha, beta, gamma, delta, eta, g1_generator, g2_generator)
 }
