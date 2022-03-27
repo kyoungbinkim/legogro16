@@ -20,8 +20,8 @@ use rayon::prelude::*;
 // link as of now, only the commitment to the witness is needed in the proof.
 
 #[inline]
-/// Generates a random common reference string for
-/// a circuit.
+/// Generates a random common reference string for a circuit including CP_link evaluation and verification key.
+/// `commit_witness_count` is the number of witnesses committed in proof as well as in CP_link
 pub fn generate_random_parameters_incl_cp_link<E, C, R>(
     circuit: C,
     link_gens: LinkPublicGenerators<E>,
@@ -42,8 +42,8 @@ where
 }
 
 #[inline]
-/// Generates a random common reference string for
-/// a circuit.
+/// Generates a random common reference string for a circuit.
+/// `commit_witness_count` is the number of witnesses committed in proof
 pub fn generate_random_parameters<E, C, R>(
     circuit: C,
     commit_witness_count: usize,
@@ -63,9 +63,7 @@ where
 
 /// Generates a random common reference string for
 /// a circuit.
-/// `pedersen_bases` are the bases (commitment key) for link (Pedersen) commitment to the first
-/// `commit_witness_count` witness variables allocated in the circuit. The commitment also commits
-/// to the public variables
+/// `commit_witness_count` is the number of witnesses committed in proof
 #[inline]
 pub fn generate_random_parameters_with_reduction<E, C, R, QAP>(
     circuit: C,
@@ -95,11 +93,9 @@ where
     )
 }
 
-/// Generates a random common reference string for
-/// a circuit.
-/// `pedersen_bases` are the bases (commitment key) for link (Pedersen) commitment to the first
-/// `commit_witness_count` witness variables allocated in the circuit. The commitment also commits
-/// to the public variables
+/// Generates a random common reference string for a circuit.
+/// `link_gens` are the bases (commitment key) for link (Pedersen) commitment to the first
+/// `commit_witness_count` witnesses committed in CP_link as well as in proof
 #[inline]
 pub fn generate_random_parameters_incl_cp_link_with_reduction<E, C, R, QAP>(
     circuit: C,
@@ -242,7 +238,8 @@ where
     Ok(pk)
 }
 
-/// Create parameters for a circuit, given some toxic waste, R1CS to QAP calculator and group generators
+/// Create parameters for a circuit, given some toxic waste, R1CS to QAP calculator and group generators.
+/// Returns the proving key and the number of public inputs.
 #[inline]
 fn generate_parameters_and_extra_info_with_qap<E, C, R, QAP>(
     circuit: C,

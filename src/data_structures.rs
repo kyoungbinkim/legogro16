@@ -200,6 +200,7 @@ impl<E: PairingEngine> ToBytes for PreparedVerifyingKey<E> {
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 
+/// The common elements for Proving Key for with and without CP_link
 #[derive(Clone, Debug, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct ProvingKeyCommon<E: PairingEngine> {
     /// The element `beta * G` in `E::G1`.
@@ -230,7 +231,7 @@ pub struct ProvingKey<E: PairingEngine> {
     pub common: ProvingKeyCommon<E>,
 }
 
-/// The prover key for for the Groth16 zkSNARK.
+/// The prover key for for the Groth16 zkSNARK with CP_link parameters
 #[derive(Clone, Debug, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct ProvingKeyWithLink<E: PairingEngine> {
     /// The underlying verification key.

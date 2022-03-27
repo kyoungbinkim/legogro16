@@ -19,8 +19,8 @@ use ark_std::ops::AddAssign;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
-/// Create a LegoGroth16 proof that is zero-knowledge.
-/// This method samples randomness for zero knowledge via `rng`.
+/// Same as `create_random_proof` but returns the CP_link and its corresponding proof as well. `link_v`
+/// is the blinding in CP_link
 #[inline]
 pub fn create_random_proof_incl_cp_link<E, C, R>(
     circuit: C,
@@ -40,7 +40,7 @@ where
     create_proof_incl_cp_link::<E, C>(circuit, pk, r, s, v, link_v)
 }
 
-/// Create a LegoGroth16 proof that is zero-knowledge.
+/// Create a LegoGroth16 proof that is zero-knowledge. `v` is the blinding used in the commitment to the witness.
 /// This method samples randomness for zero knowledge via `rng`.
 #[inline]
 pub fn create_random_proof<E, C, R>(
@@ -61,7 +61,8 @@ where
 }
 
 #[inline]
-/// Create a LegoGroth16 proof using randomness `r` and `s`.
+/// Create a LegoGroth16 proof using randomness `r`, `s`, `v` and `link_v` where `v` is the blinding in
+/// the witness commitment in proof and `link_v` is the blinding in the witness commitment in CP_link
 pub fn create_proof_incl_cp_link<E, C>(
     circuit: C,
     pk: &ProvingKeyWithLink<E>,
@@ -80,7 +81,8 @@ where
 }
 
 #[inline]
-/// Create a LegoGroth16 proof using randomness `r` and `s`.
+/// Create a LegoGroth16 proof using randomness `r`, `s` and `v` where `v` is the blinding in the witness
+/// commitment in proof.
 pub fn create_proof<E, C>(
     circuit: C,
     pk: &ProvingKey<E>,
@@ -96,7 +98,7 @@ where
 }
 
 /// Create a LegoGroth16 proof using randomness `r` and `s`.
-/// `v` is the randomness of the commitment `proof.d` and `link_v` is the randomness to cp_link commitment
+/// `v` is the randomness of the commitment `proof.d` and `link_v` is the randomness to CP_link commitment
 #[inline]
 pub fn create_proof_incl_cp_link_with_reduction<E, C, QAP>(
     circuit: C,
@@ -135,7 +137,7 @@ where
 }
 
 /// Create a LegoGroth16 proof using randomness `r` and `s`.
-/// `v` is the randomness of the commitment `proof.d` and `link_v` is the randomness to cp_link commitment
+/// `v` is the randomness of the commitment `proof.d`.
 #[inline]
 pub fn create_proof_with_reduction<E, C, QAP>(
     circuit: C,
@@ -171,6 +173,7 @@ where
     Ok(proof)
 }
 
+/// Create the proof including CP_link and its corresponding proof given the public and private input assignments
 #[inline]
 fn create_proof_incl_cp_link_with_assignment<E, QAP>(
     pk: &ProvingKeyWithLink<E>,
@@ -223,6 +226,7 @@ where
     })
 }
 
+/// Create the proof given the public and private input assignments
 #[inline]
 fn create_proof_with_assignment<E, QAP>(
     pk: &ProvingKey<E>,
@@ -251,6 +255,7 @@ where
     Ok(proof)
 }
 
+/// Returns the proof and the committed witnesses.
 #[inline]
 fn create_proof_and_committed_witnesses_with_assignment<E, QAP>(
     pk_common: &ProvingKeyCommon<E>,
@@ -415,6 +420,7 @@ pub fn verify_commitments<E: PairingEngine>(
     )
 }
 
+/// Given the proof, verify that the commitment in it (`proof.d`) commits to the witness.
 pub fn verify_witness_commitment<E: PairingEngine>(
     vk: &VerifyingKey<E>,
     proof: &Proof<E>,
@@ -441,12 +447,13 @@ pub fn verify_witness_commitment<E: PairingEngine>(
     d.add_assign(&vk.eta_gamma_inv_g1.mul(v.into_repr()));
 
     if proof.d != d.into_affine() {
-        return Err(Error::InvalidProofCommitment);
+        return Err(Error::InvalidWitnessCommitment);
     }
 
     Ok(())
 }
 
+/// Given a circuit, generate its constraints and the corresponding QAP witness.
 #[inline]
 pub fn synthesize_circuit<E, C, QAP>(
     circuit: C,

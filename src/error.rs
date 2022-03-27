@@ -8,7 +8,7 @@ pub enum Error {
     VectorLongerThanExpected(usize, usize),
     InvalidProof,
     InvalidLinkCommitment,
-    InvalidProofCommitment,
+    InvalidWitnessCommitment,
 }
 
 impl From<SynthesisError> for Error {

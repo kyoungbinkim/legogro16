@@ -159,6 +159,7 @@ where
         // Generators for committing to witnesses and 1 more for randomness (`link_v` below)
         let link_gens = get_link_public_gens(&mut rng, commit_witness_count + 1);
 
+        // Parameters for generating proof containing CP_link as well
         let params_link = generate_random_parameters_incl_cp_link::<E, _, _>(
             circuit.clone(),
             link_gens.clone(),
@@ -166,23 +167,25 @@ where
             &mut rng,
         )
         .unwrap();
+        // Parameters for generating proof without CP_link
         let params =
             generate_random_parameters::<E, _, _>(circuit.clone(), commit_witness_count, &mut rng)
                 .unwrap();
 
+        // Verifying key for LegoGroth16 including the link public params
         let pvk_link = prepare_verifying_key::<E>(&params_link.vk.groth16_vk);
+        // Verifying key for LegoGroth16
         let pvk = prepare_verifying_key::<E>(&params.vk);
 
         for _ in 0..n_iters {
             let a = E::Fr::rand(&mut rng);
             let b = E::Fr::rand(&mut rng);
-            // let a = E::Fr::from(2u64);
-            // let b = E::Fr::from(3u64);
             let mut c = a;
             c.mul_assign(&b);
 
-            // Create commitment randomness
+            // Randomness for the committed witness in proof.d
             let v = E::Fr::rand(&mut rng);
+            // Randomness for the committed witness in CP_link
             let link_v = E::Fr::rand(&mut rng);
 
             let circuit = MySillyCircuit {
@@ -190,7 +193,7 @@ where
                 b: Some(b),
             };
 
-            // Create a LegoGro16 proof with our parameters.
+            // Create a LegoGro16 proof with CP_link.
             let proof_link = create_random_proof_incl_cp_link(
                 circuit.clone(),
                 v,
@@ -199,9 +202,10 @@ where
                 &mut rng,
             )
             .unwrap();
+            // Create a LegoGro16 proof without CP_link.
             let proof = create_random_proof(circuit, v, &params, &mut rng).unwrap();
 
-            // Prover verifies the openings of the commitments
+            // Prover verifies the openings of the commitments in both proof.d and CP_link
             verify_commitments(&params_link.vk, &proof_link, 1, &[a, b], &v, &link_v).unwrap();
             assert!(
                 verify_commitments(&params_link.vk, &proof_link, 1, &[a], &v, &link_v).is_err()
@@ -210,15 +214,18 @@ where
                 verify_commitments(&params_link.vk, &proof_link, 2, &[a, b], &v, &link_v).is_err()
             );
 
+            // Prover verifies the openings of the commitments in proof.d
             verify_witness_commitment(&params.vk, &proof, 1, &[a, b], &v).unwrap();
             assert!(verify_witness_commitment(&params.vk, &proof, 1, &[a], &v).is_err());
             assert!(verify_witness_commitment(&params.vk, &proof, 2, &[a, b], &v).is_err());
 
+            // Verify LegoGroth16 proof and CP_link proof
             verify_proof_incl_cp_link(&pvk_link, &params_link.vk, &proof_link, &[c]).unwrap();
             assert!(
                 verify_proof_incl_cp_link(&pvk_link, &params_link.vk, &proof_link, &[]).is_err()
             );
 
+            // Verify LegoGroth16 proof
             verify_proof(&pvk, &proof, &[c]).unwrap();
             assert!(verify_proof(&pvk, &proof, &[]).is_err());
         }
@@ -231,6 +238,7 @@ where
         // Generators for committing to witnesses and 1 more for randomness (`link_v` below)
         let link_gens = get_link_public_gens(&mut rng, commit_witness_count + 1);
 
+        // Parameters for generating proof containing CP_link as well
         let params_link = generate_random_parameters_incl_cp_link::<E, _, _>(
             circuit.clone(),
             link_gens.clone(),
@@ -238,22 +246,24 @@ where
             &mut rng,
         )
         .unwrap();
+        // Parameters for generating proof without CP_link
         let params =
             generate_random_parameters::<E, _, _>(circuit, commit_witness_count, &mut rng).unwrap();
 
+        // Verifying key for LegoGroth16 including the link public params
         let pvk_link = prepare_verifying_key::<E>(&params_link.vk.groth16_vk);
+        // Verifying key for LegoGroth16
         let pvk = prepare_verifying_key::<E>(&params.vk);
 
         for _ in 0..n_iters {
             let a = E::Fr::rand(&mut rng);
             let b = E::Fr::rand(&mut rng);
-            // let a = E::Fr::from(2u64);
-            // let b = E::Fr::from(3u64);
             let mut c = a;
             c.mul_assign(&b);
 
-            // Create commitment randomness
+            // Randomness for the committed witness in proof.d
             let v = E::Fr::rand(&mut rng);
+            // Randomness for the committed witness in CP_link
             let link_v = E::Fr::rand(&mut rng);
 
             let circuit = MySillyCircuit {
@@ -261,7 +271,7 @@ where
                 b: Some(b),
             };
 
-            // Create a LegoGro16 proof with our parameters.
+            // Create a LegoGro16 proof with CP_link.
             let proof_link = create_random_proof_incl_cp_link(
                 circuit.clone(),
                 v,
@@ -270,9 +280,10 @@ where
                 &mut rng,
             )
             .unwrap();
+            // Create a LegoGro16 proof without CP_link.
             let proof = create_random_proof(circuit, v, &params, &mut rng).unwrap();
 
-            // Prover verifies the openings of the commitments
+            // Prover verifies the openings of the commitments in both proof.d and CP_link
             verify_commitments(&params_link.vk, &proof_link, 1, &[a], &v, &link_v).unwrap();
             assert!(
                 verify_commitments(&params_link.vk, &proof_link, 1, &[a, b], &v, &link_v).is_err()
@@ -281,15 +292,18 @@ where
                 verify_commitments(&params_link.vk, &proof_link, 2, &[a], &v, &link_v).is_err()
             );
 
+            // Prover verifies the openings of the commitments in proof.d
             verify_witness_commitment(&params.vk, &proof, 1, &[a], &v).unwrap();
             assert!(verify_witness_commitment(&params.vk, &proof, 1, &[a, b], &v).is_err());
             assert!(verify_witness_commitment(&params.vk, &proof, 2, &[a], &v).is_err());
 
+            // Verify LegoGroth16 proof and CP_link proof
             verify_proof_incl_cp_link(&pvk_link, &params_link.vk, &proof_link, &[c]).unwrap();
             assert!(
                 verify_proof_incl_cp_link(&pvk_link, &params_link.vk, &proof_link, &[]).is_err()
             );
 
+            // Verify LegoGroth16 proof
             verify_proof(&pvk, &proof, &[c]).unwrap();
             assert!(verify_proof(&pvk, &proof, &[]).is_err());
         }
@@ -314,6 +328,7 @@ where
         c: None,
         d: None,
     };
+    // Parameters for generating proof containing CP_link as well
     let params_link = generate_random_parameters_incl_cp_link::<E, _, _>(
         circuit.clone(),
         link_gens.clone(),
@@ -321,9 +336,11 @@ where
         &mut rng,
     )
     .unwrap();
+    // Parameters for generating proof without CP_link
     let params =
         generate_random_parameters::<E, _, _>(circuit, commit_witness_count, &mut rng).unwrap();
 
+    // Verifying key for LegoGroth16 including the link public params
     let pvk_link = prepare_verifying_key::<E>(&params_link.vk.groth16_vk);
     let pvk = prepare_verifying_key::<E>(&params.vk);
 
@@ -339,8 +356,9 @@ where
 
         let y = e + f;
 
-        // Create commitment randomness
+        // Randomness for the committed witness in proof.d
         let v = E::Fr::rand(&mut rng);
+        // Randomness for the committed witness in CP_link
         let link_v = E::Fr::rand(&mut rng);
 
         // Create a LegoGro16 proof with our parameters.
@@ -351,12 +369,14 @@ where
             d: Some(d),
         };
 
+        // Create a LegoGro16 proof with CP_link.
         let proof_link =
             create_random_proof_incl_cp_link(circuit.clone(), v, link_v, &params_link, &mut rng)
                 .unwrap();
+        // Create a LegoGro16 proof without CP_link.
         let proof = create_random_proof(circuit.clone(), v, &params, &mut rng).unwrap();
 
-        // Prover verifies the openings of the commitments
+        // Prover verifies the openings of the commitments in both proof.d and CP_link
         verify_commitments(&params_link.vk, &proof_link, 1, &[a, b, c, d], &v, &link_v).unwrap();
         assert!(
             verify_commitments(&params_link.vk, &proof_link, 0, &[a, b, c, d], &v, &link_v)
@@ -366,13 +386,16 @@ where
             verify_commitments(&params_link.vk, &proof_link, 1, &[a, b, c], &v, &link_v).is_err()
         );
 
+        // Prover verifies the openings of the commitments in proof.d
         verify_witness_commitment(&params.vk, &proof, 1, &[a, b, c, d], &v).unwrap();
         assert!(verify_witness_commitment(&params.vk, &proof, 0, &[a, b, c, d], &v).is_err());
         assert!(verify_witness_commitment(&params.vk, &proof, 1, &[a, b, c], &v).is_err());
 
+        // Verify LegoGroth16 proof and CP_link proof
         verify_proof_incl_cp_link(&pvk_link, &params_link.vk, &proof_link, &[y]).unwrap();
         assert!(verify_proof_incl_cp_link(&pvk_link, &params_link.vk, &proof_link, &[]).is_err());
 
+        // Verify LegoGroth16 proof
         verify_proof(&pvk, &proof, &[y]).unwrap();
         assert!(verify_proof(&pvk, &proof, &[]).is_err());
     }
@@ -396,6 +419,7 @@ where
         c: None,
         d: None,
     };
+    // Parameters for generating proof containing CP_link as well
     let params_link = generate_random_parameters_incl_cp_link::<E, _, _>(
         circuit.clone(),
         link_gens.clone(),
@@ -403,9 +427,12 @@ where
         &mut rng,
     )
     .unwrap();
+    // Parameters for generating proof without CP_link
     let params = generate_random_parameters::<E, _, _>(circuit, 4, &mut rng).unwrap();
 
+    // Verifying key for LegoGroth16 including the link public params
     let pvk_link = prepare_verifying_key::<E>(&params_link.vk.groth16_vk);
+    // Verifying key for LegoGroth16
     let pvk = prepare_verifying_key::<E>(&params.vk);
 
     for _ in 0..n_iters {
@@ -420,8 +447,9 @@ where
         let mut f = c;
         f.mul_assign(&d);
 
-        // Create commitment randomness
+        // Randomness for the committed witness in proof.d
         let v = E::Fr::rand(&mut rng);
+        // Randomness for the committed witness in CP_link
         let link_v = E::Fr::rand(&mut rng);
 
         // Create a LegoGro16 proof with our parameters.
@@ -432,12 +460,14 @@ where
             d: Some(d),
         };
 
+        // Create a LegoGro16 proof with CP_link.
         let proof_link =
             create_random_proof_incl_cp_link(circuit.clone(), v, link_v, &params_link, &mut rng)
                 .unwrap();
+        // Create a LegoGro16 proof without CP_link.
         let proof = create_random_proof(circuit.clone(), v, &params, &mut rng).unwrap();
 
-        // Prover verifies the openings of the commitments
+        // Prover verifies the openings of the commitments in both proof.d and CP_link
         verify_commitments(&params_link.vk, &proof_link, 2, &[a, b, c, d], &v, &link_v).unwrap();
         assert!(
             verify_commitments(&params_link.vk, &proof_link, 1, &[a, b, c, d], &v, &link_v)
@@ -445,14 +475,17 @@ where
         );
         assert!(verify_commitments(&params_link.vk, &proof_link, 2, &[a, b], &v, &link_v).is_err());
 
+        // Prover verifies the openings of the commitments in proof.d
         verify_witness_commitment(&params.vk, &proof, 2, &[a, b, c, d], &v).unwrap();
         assert!(verify_witness_commitment(&params.vk, &proof, 1, &[a, b, c, d], &v).is_err());
         assert!(verify_witness_commitment(&params.vk, &proof, 2, &[a, b], &v).is_err());
 
+        // Verify LegoGroth16 proof and CP_link proof
         verify_proof_incl_cp_link(&pvk_link, &params_link.vk, &proof_link, &[e, f]).unwrap();
         assert!(verify_proof_incl_cp_link(&pvk_link, &params_link.vk, &proof_link, &[e]).is_err());
         assert!(verify_proof_incl_cp_link(&pvk_link, &params_link.vk, &proof_link, &[]).is_err());
 
+        // Verify LegoGroth16 proof
         verify_proof(&pvk, &proof, &[e, f]).unwrap();
         assert!(verify_proof(&pvk, &proof, &[e]).is_err());
         assert!(verify_proof(&pvk, &proof, &[]).is_err());

@@ -1,5 +1,7 @@
-//! An implementation of the [`Groth16`] zkSNARK.
+//! An implementation of the [`LegoGroth16`] zkSNARK.
+//! An implementation of the LegoGroth16, the [`LegoSNARK`] variant of [`Groth16`] zkSNARK proof system.
 //!
+//! [`LegoSNARK`]: https://eprint.iacr.org/2019/142.pdf
 //! [`Groth16`]: https://eprint.iacr.org/2016/260.pdf
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(unused, future_incompatible, nonstandard_style, rust_2018_idioms)]

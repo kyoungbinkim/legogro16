@@ -9,11 +9,13 @@
 
 The arkworks ecosystem consist of Rust libraries for designing and working with __zero knowledge succinct non-interactive arguments (zkSNARKs)__. 
 This repository contains an implementation of the LegoGroth16, the [LegoSNARK](https://eprint.iacr.org/2019/142) variant of [Groth16](https://eprint.iacr.org/2016/260) zkSNARK proof system.  
-This project started as fork of [this](https://github.com/kobigurk/legogro16) but is updated to commit to a subset of the witnesses by specifying the
-count, say `n`, of the witnesses to commit during CRS generation. By convention, it commits to the first `n` variables allocated for witnesses in the circuit.   
-The proof contains 2 commitments, to the witness variables but with different commitment keys and randomness. 
+This project started as fork of [this](https://github.com/kobigurk/legogro16) but is updated to 
+- commit to a subset of the witnesses by specifying the count, say `n`, of the witnesses to commit during CRS generation. 
+  By convention, it commits to the first `n` variables allocated for witnesses in the circuit and the proof contains that commitment
+- either contain CP_link as well or omit it but only have the proof contain the commitment. The proof here contains 2 commitments (one is same as above)
+  to the witness variables but with different commitment keys and randomness. 
 
-The zkSNARK for Linear Subspaces from appendix D is [here](src/link/snark.rs).
+The zkSNARK for Linear Subspaces from appendix D of LegoSNARK paper is [here](src/link/snark.rs).
 
 
 This library is released under the MIT License and the Apache v2 License (see [License](#license)).

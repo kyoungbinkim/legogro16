@@ -186,7 +186,7 @@ fn test_mimc_legogroth16() {
         constants: &constants,
     };
 
-    // Create parameters for our circuit
+    // Parameters for generating proof containing CP_link as well
     let params_link = generate_random_parameters_incl_cp_link::<Bls12_377, _, _>(
         c.clone(),
         link_gens.clone(),
@@ -194,10 +194,12 @@ fn test_mimc_legogroth16() {
         &mut rng,
     )
     .unwrap();
+    // Parameters for generating proof without CP_link
     let params = generate_random_parameters::<Bls12_377, _, _>(c, 2, &mut rng).unwrap();
 
-    // Prepare the verification key (for proof verification)
+    // Verifying key for LegoGroth16 including the link public params
     let pvk_link = prepare_verifying_key(&params_link.vk.groth16_vk);
+    // Verifying key for LegoGroth16
     let pvk = prepare_verifying_key(&params.vk);
 
     println!("Creating proofs...");
@@ -224,30 +226,35 @@ fn test_mimc_legogroth16() {
                 constants: &constants,
             };
 
-            // Create commitment randomness
+            // Randomness for the committed witness in proof.d
             let v = Fr::rand(&mut rng);
+            // Randomness for the committed witness in CP_link
             let link_v = Fr::rand(&mut rng);
 
-            // Create a LegoGro16 proof with our parameters.
-
             let start = Instant::now();
+            // Create a LegoGro16 proof with CP_link.
             let proof_link =
                 create_random_proof_incl_cp_link(c.clone(), v, link_v, &params_link, &mut rng)
                     .unwrap();
             total_proving_inc_link += start.elapsed();
 
             let start = Instant::now();
+            // Create a LegoGro16 proof without CP_link.
             let proof = create_random_proof(c, v, &params, &mut rng).unwrap();
             total_proving += start.elapsed();
 
+            // Prover verifies the openings of the commitments in both proof.d and CP_link
             verify_commitments(&params_link.vk, &proof_link, 1, &[xl, xr], &v, &link_v).unwrap();
+            // Prover verifies the openings of the commitments in proof.d
             verify_witness_commitment(&params.vk, &proof, 1, &[xl, xr], &v).unwrap();
 
             let start = Instant::now();
+            // Verify LegoGroth16 proof and CP_link proof
             verify_proof_incl_cp_link(&pvk_link, &params_link.vk, &proof_link, &[image]).unwrap();
             total_verifying_inc_link += start.elapsed();
 
             let start = Instant::now();
+            // Verify LegoGroth16 proof
             verify_proof(&pvk, &proof, &[image]).unwrap();
             total_verifying += start.elapsed();
 
