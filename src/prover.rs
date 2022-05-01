@@ -8,7 +8,7 @@ use ark_ec::{msm::VariableBaseMSM, AffineCurve, PairingEngine, ProjectiveCurve};
 use ark_ff::{PrimeField, UniformRand, Zero};
 use ark_poly::GeneralEvaluationDomain;
 use ark_relations::r1cs::{
-    ConstraintSynthesizer, ConstraintSystem, ConstraintSystemRef, OptimizationGoal,
+    ConstraintSynthesizer, ConstraintSystem, ConstraintSystemRef, OptimizationGoal, SynthesisError,
 };
 use ark_std::rand::Rng;
 use ark_std::{cfg_into_iter, cfg_iter, end_timer, start_timer, vec, vec::Vec};
@@ -471,7 +471,9 @@ where
     // Synthesize the circuit.
     let synthesis_time = start_timer!(|| "Constraint synthesis");
     circuit.generate_constraints(cs.clone())?;
-    debug_assert!(cs.is_satisfied().unwrap());
+    if !cs.is_satisfied()? {
+        return Err(Error::SynthesisError(SynthesisError::Unsatisfiable));
+    }
     end_timer!(synthesis_time);
 
     let lc_time = start_timer!(|| "Inlining LCs");
