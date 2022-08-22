@@ -1,4 +1,4 @@
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum LinkError {
     InvalidIndex(usize, usize),
     VectorLongerThanExpected(usize, usize),

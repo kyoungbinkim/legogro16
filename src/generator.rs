@@ -286,7 +286,12 @@ where
     ///////////////////////////////////////////////////////////////////////////
 
     let num_instance_variables = cs.num_instance_variables();
-    assert!(cs.num_witness_variables() >= commit_witness_count);
+    if cs.num_witness_variables() < commit_witness_count {
+        return Err(crate::error::Error::InsufficientWitnessesForCommitment(
+            cs.num_witness_variables(),
+            commit_witness_count,
+        ));
+    }
 
     let n = num_instance_variables + commit_witness_count;
 

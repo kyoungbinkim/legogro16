@@ -4,7 +4,7 @@
 //! [`LegoSNARK`]: https://eprint.iacr.org/2019/142.pdf
 //! [`Groth16`]: https://eprint.iacr.org/2016/260.pdf
 #![cfg_attr(not(feature = "std"), no_std)]
-#![warn(unused, future_incompatible, nonstandard_style, rust_2018_idioms)]
+#![warn(unused, future_incompatible, nonstandard_style)]
 #![allow(clippy::many_single_char_names, clippy::op_ref)]
 #![forbid(unsafe_code)]
 
@@ -33,6 +33,9 @@ pub mod verifier;
 pub mod link;
 
 pub mod error;
+
+#[cfg(feature = "circom")]
+pub mod circom;
 
 /// Constraints for the Groth16 verifier.
 // Cannot yet create a LegoGroth16 gadget (for recursive proof) so commenting it out.
