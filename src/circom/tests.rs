@@ -2,24 +2,25 @@ use crate::circom::circuit::CircomCircuit;
 use crate::circom::witness::WitnessCalculator;
 use crate::tests::get_link_public_gens;
 use crate::{
-    create_random_proof, generate_random_parameters, generate_random_parameters_incl_cp_link,
-    prepare_verifying_key, verify_proof, verify_witness_commitment, ProvingKey, ProvingKeyWithLink,
+    create_random_proof, generate_random_parameters_incl_cp_link, prepare_verifying_key,
+    verify_proof, verify_witness_commitment, ProvingKey, ProvingKeyWithLink,
 };
 use ark_bls12_381::Bls12_381;
 use ark_bn254::Bn254;
 use ark_ec::PairingEngine;
-use ark_ff::Field;
+use ark_ff::{Field, One, Zero};
 use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystem};
 use ark_std::rand::prelude::StdRng;
 use ark_std::rand::SeedableRng;
 use ark_std::UniformRand;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::ops::AddAssign;
 use std::path::PathBuf;
 
-pub fn abs_path(p: &str) -> String {
+/// Given path relative to this crate, return absolute disk path
+pub fn abs_path(relative_path: &str) -> String {
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    path.push(p);
+    path.push(relative_path);
     path.to_string_lossy().to_string()
 }
 
@@ -37,33 +38,17 @@ pub fn gen_params<E: PairingEngine>(
     )
     .unwrap();
     // Parameters for generating proof without CP_link
-    let params =
-        generate_random_parameters::<E, _, _>(circuit, commit_witness_count, &mut rng).unwrap();
+    let params = circuit
+        .generate_proving_key(commit_witness_count, &mut rng)
+        .unwrap();
     (params_link, params)
 }
 
-pub fn generate_params_prove_and_verify<
-    E: PairingEngine,
-    I: IntoIterator<Item = (String, Vec<E::Fr>)>,
->(
-    r1cs_file_path: &str,
-    wasm_file_path: &str,
+pub fn prove_and_verify_circuit<E: PairingEngine>(
+    circuit: CircomCircuit<E>,
+    params: &ProvingKey<E>,
     commit_witness_count: usize,
-    inputs: I,
 ) -> Vec<E::Fr> {
-    let mut circuit = CircomCircuit::<E>::from_r1cs_file(abs_path(r1cs_file_path)).unwrap();
-
-    let cs = ConstraintSystem::<E::Fr>::new_ref();
-    circuit.clone().generate_constraints(cs.clone()).unwrap();
-    println!("Constraints generated");
-
-    let (_, params) = gen_params::<E>(commit_witness_count, circuit.clone());
-    println!("Params generated");
-
-    let mut wits_calc = WitnessCalculator::<E>::from_wasm_file(wasm_file_path).unwrap();
-    let all_inputs = wits_calc.calculate_witnesses::<I>(inputs, false).unwrap();
-
-    circuit.wires = Some(all_inputs);
     let cs = ConstraintSystem::<E::Fr>::new_ref();
     circuit.clone().generate_constraints(cs.clone()).unwrap();
     assert!(cs.is_satisfied().unwrap());
@@ -78,9 +63,9 @@ pub fn generate_params_prove_and_verify<
         .take(commit_witness_count)
         .collect::<Vec<_>>();
     // Randomness for the committed witness in proof.d
-    let mut rng = StdRng::seed_from_u64(0u64);
+    let mut rng = StdRng::seed_from_u64(300u64);
     let v = E::Fr::rand(&mut rng);
-    let proof = create_random_proof(circuit, v, &params, &mut rng).unwrap();
+    let proof = create_random_proof(circuit, v, params, &mut rng).unwrap();
     println!("Proof generated");
 
     let pvk = prepare_verifying_key::<E>(&params.vk);
@@ -96,6 +81,41 @@ pub fn generate_params_prove_and_verify<
     verify_proof(&pvk, &proof, &public_inputs).unwrap();
     println!("Proof verified");
     return public_inputs;
+}
+
+pub fn generate_params_prove_and_verify<
+    E: PairingEngine,
+    I: IntoIterator<Item = (String, Vec<E::Fr>)>,
+>(
+    r1cs_file_path: &str,
+    wasm_file_path: &str,
+    commit_witness_count: usize,
+    inputs: I,
+    num_inputs: u32,
+) -> Vec<E::Fr> {
+    let mut circuit = CircomCircuit::<E>::from_r1cs_file(abs_path(r1cs_file_path)).unwrap();
+
+    let (_, params) = gen_params::<E>(commit_witness_count, circuit.clone());
+    println!("Params generated");
+
+    let mut wits_calc = WitnessCalculator::<E>::from_wasm_file(wasm_file_path).unwrap();
+    let all_wires = wits_calc.calculate_witnesses::<I>(inputs, false).unwrap();
+
+    assert_eq!(wits_calc.instance.get_input_count().unwrap(), num_inputs);
+
+    circuit.set_wires(all_wires);
+    prove_and_verify_circuit(circuit, &params, commit_witness_count)
+}
+
+fn set_circuit_wires<E: PairingEngine, I: IntoIterator<Item = (String, Vec<E::Fr>)>>(
+    circuit: &mut CircomCircuit<E>,
+    wasm_file_path: &str,
+    inputs: I,
+) {
+    let mut wits_calc = WitnessCalculator::<E>::from_wasm_file(wasm_file_path).unwrap();
+    circuit
+        .set_wires_using_witness_calculator(&mut wits_calc, inputs, false)
+        .unwrap();
 }
 
 fn test3<E: PairingEngine>(r1cs_file_path: &str, wasm_file_path: &str) {
@@ -120,6 +140,7 @@ fn test3<E: PairingEngine>(r1cs_file_path: &str, wasm_file_path: &str) {
         wasm_file_path,
         4,
         inputs.clone().into_iter(),
+        6,
     );
 
     assert_eq!(public.len(), 4);
@@ -156,6 +177,7 @@ fn test4<E: PairingEngine>(r1cs_file_path: &str, wasm_file_path: &str) {
         wasm_file_path,
         4,
         inputs.clone().into_iter(),
+        8,
     );
 
     assert_eq!(public.len(), 6);
@@ -198,6 +220,7 @@ fn nconstraints<E: PairingEngine>(
         wasm_file_path,
         commit_witness_count,
         inputs.into_iter(),
+        1,
     );
     let mut accum = input;
     for i in 1..num_constraints {
@@ -225,6 +248,7 @@ fn multiply_n<E: PairingEngine>(
         wasm_file_path,
         commit_witness_count,
         inputs.into_iter(),
+        input_arr_size as u32,
     );
     let mut expected = E::Fr::from(1u64);
     for i in inp {
@@ -255,6 +279,7 @@ fn multiply_2_bounded<E: PairingEngine>(
         wasm_file_path,
         commit_witness_count,
         inputs.into_iter(),
+        2,
     );
     assert_eq!(public[0], E::Fr::from(a as u128 * b as u128));
 }
@@ -277,6 +302,7 @@ fn mimc<E: PairingEngine>(
         wasm_file_path,
         commit_witness_count,
         inputs.into_iter(),
+        input_arr_size as u32 + 1,
     );
     assert_eq!(public.len(), 1);
 }
@@ -300,6 +326,7 @@ fn mimcsponge<E: PairingEngine>(
         wasm_file_path,
         commit_witness_count,
         inputs.into_iter(),
+        input_arr_size as u32 + 1,
     );
     assert_eq!(public.len(), output_arr_size);
 }
@@ -321,8 +348,179 @@ fn poseidon<E: PairingEngine>(
         wasm_file_path,
         commit_witness_count,
         inputs.into_iter(),
+        1,
     );
     assert_eq!(public.len(), 1);
+}
+
+fn less_than_32_bits<E: PairingEngine>(
+    r1cs_file_path: &str,
+    wasm_file_path: &str,
+    commit_witness_count: usize,
+) {
+    let mut circuit = CircomCircuit::<E>::from_r1cs_file(abs_path(r1cs_file_path)).unwrap();
+
+    let (_, params) = gen_params::<E>(commit_witness_count, circuit.clone());
+
+    let mut rng = StdRng::seed_from_u64(100u64);
+    for _ in 0..10 {
+        let (a, b) = {
+            let a = u32::rand(&mut rng);
+            let b = u32::rand(&mut rng);
+            if a < b {
+                (E::Fr::from(a as u64), E::Fr::from(b as u64))
+            } else {
+                (E::Fr::from(b as u64), E::Fr::from(a as u64))
+            }
+        };
+
+        // `a < b` so output of less_than_32 circuit should be 1.
+        let mut inputs = HashMap::new();
+        inputs.insert("a".to_string(), vec![a]);
+        inputs.insert("b".to_string(), vec![b]);
+        set_circuit_wires(&mut circuit, wasm_file_path, inputs.clone());
+        let public = prove_and_verify_circuit(circuit.clone(), &params, commit_witness_count);
+        assert_eq!(public.len(), 1);
+        assert!(public[0].is_one());
+
+        // `a > b` so output of less_than_32 circuit should be 0.
+        inputs.insert("a".to_string(), vec![b]);
+        inputs.insert("b".to_string(), vec![a]);
+        set_circuit_wires(&mut circuit, wasm_file_path, inputs);
+        let public = prove_and_verify_circuit(circuit.clone(), &params, commit_witness_count);
+        assert_eq!(public.len(), 1);
+        assert!(public[0].is_zero());
+    }
+}
+
+fn all_different_10<E: PairingEngine>(
+    r1cs_file_path: &str,
+    wasm_file_path: &str,
+    commit_witness_count: usize,
+) {
+    let mut circuit = CircomCircuit::<E>::from_r1cs_file(abs_path(r1cs_file_path)).unwrap();
+
+    let mut rng = StdRng::seed_from_u64(100u64);
+    let params = circuit
+        .clone()
+        .generate_proving_key(commit_witness_count, &mut rng)
+        .unwrap();
+
+    for _ in 0..10 {
+        let mut inp = BTreeSet::new();
+        while inp.len() != 10 {
+            inp.insert(E::Fr::rand(&mut rng));
+        }
+        let mut inp = inp.into_iter().collect::<Vec<_>>();
+        let mut inputs = HashMap::new();
+        inputs.insert("in".to_string(), inp.clone());
+
+        set_circuit_wires(&mut circuit, wasm_file_path, inputs.clone());
+        let public = prove_and_verify_circuit(circuit.clone(), &params, commit_witness_count);
+        assert_eq!(public.len(), 1);
+        assert!(public[0].is_one());
+
+        // Make 1 input same
+        inp[5] = inp[1].clone();
+        inputs.insert("in".to_string(), inp.clone());
+        set_circuit_wires(&mut circuit, wasm_file_path, inputs.clone());
+        let public = prove_and_verify_circuit(circuit.clone(), &params, commit_witness_count);
+        assert_eq!(public.len(), 1);
+        assert!(public[0].is_zero());
+
+        // Make 2 inputs same
+        inp[9] = inp[1].clone();
+        inputs.insert("in".to_string(), inp.clone());
+        /*let mut wits_calc = WitnessCalculator::<E>::from_wasm_file(wasm_file_path).unwrap();
+        let all_inputs = wits_calc.calculate_witnesses::<_>(inputs, false).unwrap();
+        circuit.wires = Some(all_inputs);*/
+        set_circuit_wires(&mut circuit, wasm_file_path, inputs.clone());
+        let public = prove_and_verify_circuit(circuit.clone(), &params, commit_witness_count);
+        assert_eq!(public.len(), 1);
+        assert!(public[0].is_zero());
+    }
+}
+
+fn not_equal_public<E: PairingEngine>(
+    r1cs_file_path: &str,
+    wasm_file_path: &str,
+    commit_witness_count: usize,
+) {
+    let mut circuit = CircomCircuit::<E>::from_r1cs_file(abs_path(r1cs_file_path)).unwrap();
+
+    let mut rng = StdRng::seed_from_u64(100u64);
+    let params = circuit
+        .clone()
+        .generate_proving_key(commit_witness_count, &mut rng)
+        .unwrap();
+
+    for _ in 0..10 {
+        let a = E::Fr::rand(&mut rng);
+        let b = E::Fr::rand(&mut rng);
+        let mut inputs = HashMap::new();
+
+        // Inputs are unequal
+        inputs.insert("in".to_string(), vec![a]);
+        inputs.insert("pub".to_string(), vec![b]);
+
+        set_circuit_wires(&mut circuit, wasm_file_path, inputs.clone());
+        let public = prove_and_verify_circuit(circuit.clone(), &params, commit_witness_count);
+        assert_eq!(public.len(), 2);
+        assert!(public[0].is_one());
+        assert_eq!(public[1], b);
+
+        // Make inputs equal to make test fail
+        inputs.insert("pub".to_string(), vec![a]);
+        set_circuit_wires(&mut circuit, wasm_file_path, inputs.clone());
+        let public = prove_and_verify_circuit(circuit.clone(), &params, commit_witness_count);
+        assert_eq!(public.len(), 2);
+        assert!(public[0].is_zero());
+        assert_eq!(public[1], a);
+    }
+}
+
+fn less_than_public_64_bits<E: PairingEngine>(
+    r1cs_file_path: &str,
+    wasm_file_path: &str,
+    commit_witness_count: usize,
+) {
+    let mut circuit = CircomCircuit::<E>::from_r1cs_file(abs_path(r1cs_file_path)).unwrap();
+
+    let (_, params) = gen_params::<E>(commit_witness_count, circuit.clone());
+
+    let mut rng = StdRng::seed_from_u64(100u64);
+    for _ in 0..10 {
+        let (a, b) = {
+            let a = u64::rand(&mut rng);
+            let b = u64::rand(&mut rng);
+            if a < b {
+                (E::Fr::from(a), E::Fr::from(b))
+            } else {
+                (E::Fr::from(b), E::Fr::from(a))
+            }
+        };
+
+        // `a < b` so output of less_than_32 circuit should be 1.
+        let mut inputs = HashMap::new();
+        inputs.insert("a".to_string(), vec![a]);
+        inputs.insert("b".to_string(), vec![b]);
+        set_circuit_wires(&mut circuit, wasm_file_path, inputs.clone());
+        let public = prove_and_verify_circuit(circuit.clone(), &params, commit_witness_count);
+        // 2 because there is 1 output signal and 1 public input `b`
+        assert_eq!(public.len(), 2);
+        assert!(public[0].is_one());
+        assert_eq!(public[1], b);
+
+        // `a > b` so output of less_than_32 circuit should be 0.
+        inputs.insert("a".to_string(), vec![b]);
+        inputs.insert("b".to_string(), vec![a]);
+        set_circuit_wires(&mut circuit, wasm_file_path, inputs.clone());
+        let public = prove_and_verify_circuit(circuit.clone(), &params, commit_witness_count);
+        // 2 because there is 1 output signal and 1 public input `a`
+        assert_eq!(public.len(), 2);
+        assert!(public[0].is_zero());
+        assert_eq!(public[1], a);
+    }
 }
 
 #[test]
@@ -451,10 +649,69 @@ fn mimcsponge_bls12_381() {
     mimcsponge::<Bls12_381>(r1cs_file_path, wasm_file_path, 8, 2, 3);
 }
 
+// TODO: Fixme
 #[ignore]
 #[test]
 fn poseidon_bn128() {
     let r1cs_file_path = "test-vectors/bn128/poseidon_bn128.r1cs";
     let wasm_file_path = "test-vectors/bn128/poseidon_bn128.wasm";
     poseidon::<Bn254>(r1cs_file_path, wasm_file_path, 5, 5);
+}
+
+#[test]
+fn less_than_32_bits_bn128() {
+    let r1cs_file_path = "test-vectors/bn128/less_than_32.r1cs";
+    let wasm_file_path = "test-vectors/bn128/less_than_32.wasm";
+    less_than_32_bits::<Bn254>(r1cs_file_path, wasm_file_path, 2);
+    less_than_32_bits::<Bn254>(r1cs_file_path, wasm_file_path, 1);
+}
+
+#[test]
+fn less_than_32_bits_bls12_381() {
+    let r1cs_file_path = "test-vectors/bls12-381/less_than_32.r1cs";
+    let wasm_file_path = "test-vectors/bls12-381/less_than_32.wasm";
+    less_than_32_bits::<Bls12_381>(r1cs_file_path, wasm_file_path, 2);
+    less_than_32_bits::<Bls12_381>(r1cs_file_path, wasm_file_path, 1);
+}
+
+#[test]
+fn all_different_10_bn128() {
+    let r1cs_file_path = "test-vectors/bn128/all_different_10.r1cs";
+    let wasm_file_path = "test-vectors/bn128/all_different_10.wasm";
+    all_different_10::<Bn254>(r1cs_file_path, wasm_file_path, 10);
+}
+
+#[test]
+fn all_different_10_bls12_381() {
+    let r1cs_file_path = "test-vectors/bls12-381/all_different_10.r1cs";
+    let wasm_file_path = "test-vectors/bls12-381/all_different_10.wasm";
+    all_different_10::<Bls12_381>(r1cs_file_path, wasm_file_path, 10);
+}
+
+#[test]
+fn not_equal_public_bn128() {
+    let r1cs_file_path = "test-vectors/bn128/not_equal_public.r1cs";
+    let wasm_file_path = "test-vectors/bn128/not_equal_public.wasm";
+    not_equal_public::<Bn254>(r1cs_file_path, wasm_file_path, 1);
+}
+
+#[test]
+fn not_equal_public_bls12_381() {
+    let r1cs_file_path = "test-vectors/bls12-381/not_equal_public.r1cs";
+    let wasm_file_path = "test-vectors/bls12-381/not_equal_public.wasm";
+    not_equal_public::<Bls12_381>(r1cs_file_path, wasm_file_path, 1);
+}
+
+#[test]
+fn less_than_public_64_bits_bn128() {
+    let r1cs_file_path = "test-vectors/bn128/less_than_public_64.r1cs";
+    let wasm_file_path = "test-vectors/bn128/less_than_public_64.wasm";
+    less_than_public_64_bits::<Bn254>(r1cs_file_path, wasm_file_path, 1);
+}
+
+#[test]
+fn less_than_public_64_bits_bls12_381() {
+    let r1cs_file_path = "test-vectors/bls12-381/less_than_public_64.r1cs";
+    let wasm_file_path = "test-vectors/bls12-381/less_than_public_64.wasm";
+    less_than_public_64_bits::<Bls12_381>(r1cs_file_path, wasm_file_path, 1);
 }

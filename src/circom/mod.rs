@@ -14,3 +14,8 @@ pub const BN128_ORDER: &str =
 // BLS12-381 curve's largest subgroup order
 pub const BLS12_381_ORDER: &str =
     "52435875175126190479447740508185965837690552500527637822603658699938581184513";
+
+pub use circuit::CircomCircuit;
+pub use error::CircomError;
+pub use r1cs::R1CS;
+pub use witness::WitnessCalculator;

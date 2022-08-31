@@ -631,17 +631,14 @@ mod tests {
 
     #[test]
     fn multiply2_bounded() {
-        fn check<E: PairingEngine>(file: &R1CSFile<E>, curve_type: Curve) {
-            basic_checks(&file, curve_type);
-        }
-        check(
+        basic_checks(
             &R1CSFile::<Bn254>::new_from_file(abs_path(
                 "test-vectors/bn128/multiply2_bounded.r1cs",
             ))
             .unwrap(),
             Curve::Bn128,
         );
-        check(
+        basic_checks(
             &R1CSFile::<Bls12_381>::new_from_file(abs_path(
                 "test-vectors/bls12-381/multiply2_bounded.r1cs",
             ))
@@ -652,15 +649,12 @@ mod tests {
 
     #[test]
     fn mimc() {
-        fn check<E: PairingEngine>(file: &R1CSFile<E>, curve_type: Curve) {
-            basic_checks(&file, curve_type);
-        }
-        check(
+        basic_checks(
             &R1CSFile::<Bn254>::new_from_file(abs_path("test-vectors/bn128/mimc_bn128.r1cs"))
                 .unwrap(),
             Curve::Bn128,
         );
-        check(
+        basic_checks(
             &R1CSFile::<Bls12_381>::new_from_file(abs_path(
                 "test-vectors/bls12-381/mimc_bls12_381.r1cs",
             ))
@@ -671,15 +665,12 @@ mod tests {
 
     #[test]
     fn mimcsponge() {
-        fn check<E: PairingEngine>(file: &R1CSFile<E>, curve_type: Curve) {
-            basic_checks(&file, curve_type);
-        }
-        check(
+        basic_checks(
             &R1CSFile::<Bn254>::new_from_file(abs_path("test-vectors/bn128/mimcsponge_bn128.r1cs"))
                 .unwrap(),
             Curve::Bn128,
         );
-        check(
+        basic_checks(
             &R1CSFile::<Bls12_381>::new_from_file(abs_path(
                 "test-vectors/bls12-381/mimcsponge_bls12_381.r1cs",
             ))
@@ -690,13 +681,60 @@ mod tests {
 
     #[test]
     fn poseidon() {
-        fn check<E: PairingEngine>(file: &R1CSFile<E>, curve_type: Curve) {
-            basic_checks(&file, curve_type);
-        }
-        check(
+        basic_checks(
             &R1CSFile::<Bn254>::new_from_file(abs_path("test-vectors/bn128/poseidon_bn128.r1cs"))
                 .unwrap(),
             Curve::Bn128,
+        );
+    }
+
+    #[test]
+    fn less_than_32_bits() {
+        basic_checks(
+            &R1CSFile::<Bn254>::new_from_file(abs_path("test-vectors/bn128/less_than_32.r1cs"))
+                .unwrap(),
+            Curve::Bn128,
+        );
+        basic_checks(
+            &R1CSFile::<Bls12_381>::new_from_file(abs_path(
+                "test-vectors/bls12-381/less_than_32.r1cs",
+            ))
+            .unwrap(),
+            Curve::Bls12_381,
+        );
+    }
+
+    #[test]
+    fn less_than_public_64_bits() {
+        basic_checks(
+            &R1CSFile::<Bn254>::new_from_file(abs_path(
+                "test-vectors/bn128/less_than_public_64.r1cs",
+            ))
+            .unwrap(),
+            Curve::Bn128,
+        );
+        basic_checks(
+            &R1CSFile::<Bls12_381>::new_from_file(abs_path(
+                "test-vectors/bls12-381/less_than_public_64.r1cs",
+            ))
+            .unwrap(),
+            Curve::Bls12_381,
+        );
+    }
+
+    #[test]
+    fn all_different_10() {
+        basic_checks(
+            &R1CSFile::<Bn254>::new_from_file(abs_path("test-vectors/bn128/all_different_10.r1cs"))
+                .unwrap(),
+            Curve::Bn128,
+        );
+        basic_checks(
+            &R1CSFile::<Bls12_381>::new_from_file(abs_path(
+                "test-vectors/bls12-381/all_different_10.r1cs",
+            ))
+            .unwrap(),
+            Curve::Bls12_381,
         );
     }
 }

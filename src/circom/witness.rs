@@ -69,14 +69,10 @@ impl<E: PairingEngine> WitnessCalculator<E> {
         let import_object = imports! {
             // Host function callbacks from the WASM
             "runtime" => {
-                "error" => runtime::error(store),
-                "logSetSignal" => runtime::log_signal(store),
-                "logGetSignal" => runtime::log_signal(store),
-                "logFinishComponent" => runtime::log_component(store),
-                "logStartComponent" => runtime::log_component(store),
-                "log" => runtime::log_component(store),
                 "exceptionHandler" => runtime::exception_handler(store),
                 "showSharedRWMemory" => runtime::show_memory(store),
+                "printErrorMessage" => runtime::print_error_message(store),
+                "writeBufferMessage" => runtime::write_buffer_message(store),
             }
         };
 
@@ -185,48 +181,29 @@ impl<E: PairingEngine> WitnessCalculator<E> {
 // callback hooks for debugging
 mod runtime {
     use super::*;
-    use wasmer::{Function, RuntimeError};
+    use wasmer::Function;
 
-    pub fn error(store: &Store) -> Function {
-        #[allow(unused)]
-        #[allow(clippy::many_single_char_names)]
-        fn func(a: i32, b: i32, c: i32, d: i32, e: i32, f: i32) {
-            // NOTE: We can also get more information why it is failing, see p2str etc here:
-            // https://github.com/iden3/circom_runtime/blob/master/js/witness_calculator.js#L52-L64
-            #[cfg(feature = "std")]
-            println!(
-                "runtime error, exiting early: {0} {1} {2} {3} {4} {5}",
-                a, b, c, d, e, f
-            );
-            // TODO: Better error handling
-            RuntimeError::new("unexpected error");
-        }
-        Function::new_native(store, func)
-    }
-
-    // Circom 2.0
     pub fn exception_handler(store: &Store) -> Function {
         #[allow(unused)]
         fn func(a: i32) {}
         Function::new_native(store, func)
     }
 
-    // Circom 2.0
     pub fn show_memory(store: &Store) -> Function {
         #[allow(unused)]
         fn func() {}
         Function::new_native(store, func)
     }
 
-    pub fn log_signal(store: &Store) -> Function {
+    pub fn print_error_message(store: &Store) -> Function {
         #[allow(unused)]
-        fn func(a: i32, b: i32) {}
+        fn func() {}
         Function::new_native(store, func)
     }
 
-    pub fn log_component(store: &Store) -> Function {
+    pub fn write_buffer_message(store: &Store) -> Function {
         #[allow(unused)]
-        fn func(a: i32) {}
+        fn func() {}
         Function::new_native(store, func)
     }
 }
@@ -571,27 +548,33 @@ pub mod tests {
         );
 
         assert_eq!(
-            WitnessCalculator::<Bn254>::from_wasm_file("test-vectors/bls12-381/multiply2.wasm")
-                .unwrap_err(),
+            WitnessCalculator::<Bn254>::from_wasm_file(circom::tests::abs_path(
+                "test-vectors/bls12-381/multiply2.wasm"
+            ))
+            .unwrap_err(),
             CircomError::IncompatibleWithCurve
         );
         assert_eq!(
-            WitnessCalculator::<Bls12_381>::from_wasm_file("test-vectors/bn128/multiply2.wasm")
-                .unwrap_err(),
+            WitnessCalculator::<Bls12_381>::from_wasm_file(circom::tests::abs_path(
+                "test-vectors/bn128/multiply2.wasm"
+            ))
+            .unwrap_err(),
             CircomError::IncompatibleWithCurve
         );
 
         assert_eq!(
-            WitnessCalculator::<Bn254>::from_wasm_file("test-vectors/multiply2_goldilocks.wasm")
-                .unwrap_err(),
+            WitnessCalculator::<Bn254>::from_wasm_file(circom::tests::abs_path(
+                "test-vectors/multiply2_goldilocks.wasm"
+            ))
+            .unwrap_err(),
             CircomError::UnsupportedCurve(
                 "Unknown curve with order \"18446744069414584321\"".to_string()
             )
         );
         assert_eq!(
-            WitnessCalculator::<Bls12_381>::from_wasm_file(
+            WitnessCalculator::<Bls12_381>::from_wasm_file(circom::tests::abs_path(
                 "test-vectors/multiply2_goldilocks.wasm"
-            )
+            ))
             .unwrap_err(),
             CircomError::UnsupportedCurve(
                 "Unknown curve with order \"18446744069414584321\"".to_string()

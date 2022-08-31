@@ -24,7 +24,7 @@ tracing = { version = "0.1", default-features = false, features = [ "attributes"
 derivative = { version = "2.0", features = ["use_core"], optional = true}
 rayon = { version = "1", optional = true }
 byteorder = { version = "1.4.3", optional = true }
-wasmer = { version = "2.0", optional = true }
+wasmer = { version = "2.3.0", optional = true }
 fnv = { version = "1.0.3", default-features = false, optional = true }
 num-bigint = { version = "0.4", default-features = false, optional = true }
 log = "0.4"
