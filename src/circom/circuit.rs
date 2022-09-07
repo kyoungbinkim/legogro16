@@ -1,5 +1,5 @@
 use crate::circom::error::CircomError;
-use crate::circom::r1cs::R1CS;
+use crate::circom::r1cs::{LC, R1CS};
 use crate::error::Error;
 use crate::{generate_random_parameters, ProvingKey};
 use ark_ec::PairingEngine;
@@ -106,8 +106,8 @@ impl<E: PairingEngine> ConstraintSynthesizer<E::Fr> for CircomCircuit<E> {
                 Variable::Witness(index - self.r1cs.num_public)
             }
         };
-        let make_lc = |lc_data: &[(usize, E::Fr)]| {
-            lc_data.iter().fold(
+        let make_lc = |lc_data: &LC<E>| {
+            lc_data.terms().iter().fold(
                 LinearCombination::<E::Fr>::zero(),
                 |lc: LinearCombination<E::Fr>, (index, coeff)| lc + (*coeff, make_index(*index)),
             )
@@ -115,9 +115,9 @@ impl<E: PairingEngine> ConstraintSynthesizer<E::Fr> for CircomCircuit<E> {
 
         for constraint in &self.r1cs.constraints {
             cs.enforce_constraint(
-                make_lc(&constraint.0),
-                make_lc(&constraint.1),
-                make_lc(&constraint.2),
+                make_lc(&constraint.a),
+                make_lc(&constraint.b),
+                make_lc(&constraint.c),
             )?;
         }
 
@@ -145,10 +145,6 @@ mod tests {
 
         assert_eq!(cs.num_instance_variables(), circuit.r1cs.num_public);
         assert_eq!(cs.num_witness_variables(), circuit.r1cs.num_private);
-        assert_eq!(
-            cs.num_instance_variables() + cs.num_witness_variables(),
-            circuit.r1cs.num_variables
-        );
         assert_eq!(cs.num_constraints(), circuit.r1cs.constraints.len());
 
         let (_, params) = gen_params::<E>(commit_witness_count, circuit.clone());

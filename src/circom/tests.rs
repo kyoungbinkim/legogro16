@@ -118,6 +118,27 @@ fn set_circuit_wires<E: PairingEngine, I: IntoIterator<Item = (String, Vec<E::Fr
         .unwrap();
 }
 
+fn multiply2<E: PairingEngine>(r1cs_file_path: &str, wasm_file_path: &str) {
+    let mut rng = StdRng::seed_from_u64(100u64);
+    let a = E::Fr::rand(&mut rng);
+    let b = E::Fr::rand(&mut rng);
+
+    let mut inputs = HashMap::new();
+    inputs.insert("a".to_string(), vec![a]);
+    inputs.insert("b".to_string(), vec![b]);
+
+    let public = generate_params_prove_and_verify::<E, _>(
+        r1cs_file_path,
+        wasm_file_path,
+        2,
+        inputs.clone().into_iter(),
+        2,
+    );
+
+    assert_eq!(public.len(), 1);
+    assert_eq!(a * b, public[0]);
+}
+
 fn test3<E: PairingEngine>(r1cs_file_path: &str, wasm_file_path: &str) {
     let mut rng = StdRng::seed_from_u64(100u64);
     let x = E::Fr::rand(&mut rng);
@@ -521,6 +542,20 @@ fn less_than_public_64_bits<E: PairingEngine>(
         assert!(public[0].is_zero());
         assert_eq!(public[1], a);
     }
+}
+
+#[test]
+fn multiply2_bn128() {
+    let r1cs_file_path = "test-vectors/bn128/multiply2.r1cs";
+    let wasm_file_path = "test-vectors/bn128/multiply2.wasm";
+    multiply2::<Bn254>(r1cs_file_path, wasm_file_path)
+}
+
+#[test]
+fn multiply2_bls12_381() {
+    let r1cs_file_path = "test-vectors/bls12-381/multiply2.r1cs";
+    let wasm_file_path = "test-vectors/bls12-381/multiply2.wasm";
+    multiply2::<Bls12_381>(r1cs_file_path, wasm_file_path)
 }
 
 #[test]

@@ -23,8 +23,7 @@ ark-r1cs-std = { version = "^0.3.1", default-features = false, optional = true }
 tracing = { version = "0.1", default-features = false, features = [ "attributes" ], optional = true }
 derivative = { version = "2.0", features = ["use_core"], optional = true}
 rayon = { version = "1", optional = true }
-byteorder = { version = "1.4.3", optional = true }
-wasmer = { version = "2.3.0", optional = true }
+wasmer = { version = "2.3.0", optional = true, default-features = false }
 fnv = { version = "1.0.3", default-features = false, optional = true }
 num-bigint = { version = "0.4", default-features = false, optional = true }
 log = "0.4"
@@ -49,7 +48,9 @@ lto = true
 
 [features]
 default = ["parallel", "circom"]
-std = ["ark-ff/std", "ark-ec/std", "ark-poly/std", "ark-relations/std", "ark-std/std" ]
+std = ["ark-ff/std", "ark-ec/std", "ark-poly/std", "ark-relations/std", "ark-std/std", "wasmer-sys" ]
 parallel = ["std", "ark-ff/parallel", "ark-poly/parallel", "ark-ec/parallel", "ark-std/parallel", "rayon"]
 print-trace = [ "ark-std/print-trace" ]
-circom = ["byteorder", "wasmer", "fnv", "num-bigint"]
+circom = ["wasmer", "fnv", "num-bigint"]
+wasmer-js = ["wasmer/js-default"]
+wasmer-sys = ["wasmer/sys-default"]

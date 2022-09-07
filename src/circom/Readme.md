@@ -29,7 +29,13 @@ cargo build --features=circom
 For no_std
 
 ```
-cargo build --no-default-features --features=circom
+cargo build --no-default-features --features=circom,wasmer-sys
+```
+
+For wasm target
+
+```
+cargo build --no-default-features --features=circom,wasmer-js --target wasm32-unknown-unknown
 ```
 
 ## Test

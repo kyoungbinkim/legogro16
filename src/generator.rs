@@ -428,7 +428,7 @@ where
         delta_g2: delta_g2.into_affine(),
         gamma_abc_g1: gamma_abc_g1_affine,
         eta_gamma_inv_g1: eta_gamma_inv_g1_affine,
-        commit_witness_count
+        commit_witness_count,
     };
 
     let batch_normalization_time = start_timer!(|| "Convert proving key elements to affine");

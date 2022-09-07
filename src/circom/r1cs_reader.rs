@@ -1,23 +1,23 @@
 //! R1CS circom file reader
 //! Largely copied from <https://github.com/gakonst/ark-circom/blob/master/src/circom/r1cs_reader.rs>
 //! Spec: <https://github.com/iden3/r1csfile/blob/master/doc/r1cs_bin_format.md>
-use byteorder::{LittleEndian, ReadBytesExt};
 
 use ark_ec::PairingEngine;
 use ark_ff::FromBytes;
-use ark_std::io::{Read, Seek, SeekFrom};
+use ark_std::collections::BTreeMap;
+use ark_std::format;
+use ark_std::io::Read;
+use ark_std::marker::PhantomData;
+use ark_std::{vec, vec::Vec};
+use std::io::{Seek, SeekFrom};
 
 use crate::circom::error::CircomError;
 use crate::circom::r1cs::{Constraint, Header, R1CSFile, LC};
 use crate::circom::witness::check_subgroup_order;
-use std::collections::HashMap;
-use std::fs::File;
-use std::marker::PhantomData;
-use std::path::Path;
 
 impl<E: PairingEngine> R1CSFile<E> {
-    pub fn new_from_file(path: impl AsRef<Path>) -> Result<Self, CircomError> {
-        let reader = File::open(path).map_err(|err| {
+    pub fn new_from_file(path: impl AsRef<std::path::Path>) -> Result<Self, CircomError> {
+        let reader = std::fs::File::open(path).map_err(|err| {
             log::error!("Encountered error while opening R1CS file: {:?}", err);
             CircomError::UnableToOpenR1CSFile(format!(
                 "Encountered error while opening R1CS file: {:?}",
@@ -53,8 +53,8 @@ impl<E: PairingEngine> R1CSFile<E> {
 
         // todo: handle sec_size correctly
         // section type -> file offset
-        let mut sec_offsets = HashMap::<u32, u64>::new();
-        let mut sec_sizes = HashMap::<u32, u64>::new();
+        let mut sec_offsets = BTreeMap::<u32, u64>::new();
+        let mut sec_sizes = BTreeMap::<u32, u64>::new();
 
         // get file offset of each section
         for _ in 0..num_sections {
@@ -146,24 +146,16 @@ impl<E: PairingEngine> Header<E> {
     }
 }
 
-fn read_u32<R: Read>(mut reader: R) -> Result<u32, CircomError> {
-    reader.read_u32::<LittleEndian>().map_err(|err| {
-        log::error!("Encountered error while parsing R1CS file: {:?}", err);
-        CircomError::R1CSFileParsing(format!(
-            "Encountered error while parsing R1CS file: {:?}",
-            err
-        ))
-    })
+fn read_u32<R: Read>(reader: R) -> Result<u32, CircomError> {
+    let mut buf = [0; 4];
+    read_exact(reader, &mut buf)?;
+    Ok(u32::from_le_bytes(buf))
 }
 
-fn read_u64<R: Read>(mut reader: R) -> Result<u64, CircomError> {
-    reader.read_u64::<LittleEndian>().map_err(|err| {
-        log::error!("Encountered error while parsing R1CS file: {:?}", err);
-        CircomError::R1CSFileParsing(format!(
-            "Encountered error while parsing R1CS file: {:?}",
-            err
-        ))
-    })
+fn read_u64<R: Read>(reader: R) -> Result<u64, CircomError> {
+    let mut buf = [0; 8];
+    read_exact(reader, &mut buf)?;
+    Ok(u64::from_le_bytes(buf))
 }
 
 fn read_exact<R: Read>(mut reader: R, buf: &mut [u8]) -> Result<(), CircomError> {
@@ -189,9 +181,9 @@ fn seek<R: Read + Seek>(mut reader: R, pos: SeekFrom) -> Result<u64, CircomError
 /// Read a linear combination
 fn read_lc<R: Read, E: PairingEngine>(mut reader: R) -> Result<LC<E>, CircomError> {
     let num_terms = read_u32(&mut reader)? as usize;
-    let mut vec = Vec::with_capacity(num_terms);
+    let mut terms = Vec::with_capacity(num_terms);
     for _ in 0..num_terms {
-        vec.push((
+        terms.push((
             read_u32(&mut reader)? as usize, // wire_id
             E::Fr::read(&mut reader) // coefficient
                 .map_err(|err| {
@@ -203,7 +195,7 @@ fn read_lc<R: Read, E: PairingEngine>(mut reader: R) -> Result<LC<E>, CircomErro
                 })?,
         ));
     }
-    Ok(vec)
+    Ok(LC(terms))
 }
 
 /// Read all the constraints where each constraint is a 3-tuple of linear combinations
@@ -214,11 +206,12 @@ fn read_constraints<R: Read, E: PairingEngine>(
     // todo check section size
     let mut vec = Vec::with_capacity(header.n_constraints as usize);
     for _ in 0..header.n_constraints {
-        vec.push((
-            read_lc::<&mut R, E>(&mut reader)?,
-            read_lc::<&mut R, E>(&mut reader)?,
-            read_lc::<&mut R, E>(&mut reader)?,
-        ));
+        vec.push({
+            let a = read_lc::<&mut R, E>(&mut reader)?;
+            let b = read_lc::<&mut R, E>(&mut reader)?;
+            let c = read_lc::<&mut R, E>(&mut reader)?;
+            Constraint { a, b, c }
+        });
     }
     Ok(vec)
 }
@@ -355,12 +348,12 @@ mod tests {
         assert_eq!(file.header.n_constraints, 3);
 
         assert_eq!(file.constraints.len(), 3);
-        assert_eq!(file.constraints[0].0.len(), 2);
-        assert_eq!(file.constraints[0].0[0].0, 5);
-        assert_eq!(file.constraints[0].0[0].1, BnFr::from(3));
-        assert_eq!(file.constraints[2].1[0].0, 0);
-        assert_eq!(file.constraints[2].1[0].1, BnFr::from(6));
-        assert_eq!(file.constraints[1].2.len(), 0);
+        assert_eq!(file.constraints[0].a.len(), 2);
+        assert_eq!(file.constraints[0].a.0[0].0, 5);
+        assert_eq!(file.constraints[0].a.0[0].1, BnFr::from(3));
+        assert_eq!(file.constraints[2].b.0[0].0, 0);
+        assert_eq!(file.constraints[2].b.0[0].1, BnFr::from(6));
+        assert_eq!(file.constraints[1].c.len(), 0);
 
         assert_eq!(file.wire_mapping.len(), 7);
         assert_eq!(file.wire_mapping[1], 3);
@@ -407,9 +400,9 @@ mod tests {
             assert_eq!(file.header.n_constraints, 1);
 
             assert_eq!(file.constraints.len(), 1);
-            assert_eq!(file.constraints[0].0.len(), 1);
-            assert_eq!(file.constraints[0].1.len(), 1);
-            assert_eq!(file.constraints[0].2.len(), 1);
+            assert_eq!(file.constraints[0].a.len(), 1);
+            assert_eq!(file.constraints[0].b.len(), 1);
+            assert_eq!(file.constraints[0].c.len(), 1);
 
             assert_eq!(file.wire_mapping, vec![0, 1, 2, 3]);
         }
@@ -439,12 +432,12 @@ mod tests {
             assert_eq!(file.header.n_constraints, 2);
 
             assert_eq!(file.constraints.len(), 2);
-            assert_eq!(file.constraints[0].0.len(), 1);
-            assert_eq!(file.constraints[0].1.len(), 1);
-            assert_eq!(file.constraints[0].2.len(), 1);
-            assert_eq!(file.constraints[1].0.len(), 1);
-            assert_eq!(file.constraints[1].1.len(), 1);
-            assert_eq!(file.constraints[1].2.len(), 3);
+            assert_eq!(file.constraints[0].a.len(), 1);
+            assert_eq!(file.constraints[0].b.len(), 1);
+            assert_eq!(file.constraints[0].c.len(), 1);
+            assert_eq!(file.constraints[1].a.len(), 1);
+            assert_eq!(file.constraints[1].b.len(), 1);
+            assert_eq!(file.constraints[1].c.len(), 3);
 
             assert_eq!(file.wire_mapping, vec![0, 1, 2, 3]);
         }
@@ -472,15 +465,15 @@ mod tests {
             assert_eq!(file.header.n_constraints, 3);
 
             assert_eq!(file.constraints.len(), 3);
-            assert_eq!(file.constraints[0].0.len(), 1);
-            assert_eq!(file.constraints[0].1.len(), 1);
-            assert_eq!(file.constraints[0].2.len(), 1);
-            assert_eq!(file.constraints[1].0.len(), 1);
-            assert_eq!(file.constraints[1].1.len(), 1);
-            assert_eq!(file.constraints[1].2.len(), 1);
-            assert_eq!(file.constraints[2].0.len(), 1);
-            assert_eq!(file.constraints[2].1.len(), 1);
-            assert_eq!(file.constraints[2].2.len(), 5);
+            assert_eq!(file.constraints[0].a.len(), 1);
+            assert_eq!(file.constraints[0].b.len(), 1);
+            assert_eq!(file.constraints[0].c.len(), 1);
+            assert_eq!(file.constraints[1].a.len(), 1);
+            assert_eq!(file.constraints[1].b.len(), 1);
+            assert_eq!(file.constraints[1].c.len(), 1);
+            assert_eq!(file.constraints[2].a.len(), 1);
+            assert_eq!(file.constraints[2].b.len(), 1);
+            assert_eq!(file.constraints[2].c.len(), 5);
 
             assert_eq!(file.wire_mapping, vec![0, 1, 2, 3, 4, 5]);
         }
@@ -508,21 +501,21 @@ mod tests {
             assert_eq!(file.header.n_constraints, 5);
 
             assert_eq!(file.constraints.len(), 5);
-            assert_eq!(file.constraints[0].0.len(), 1);
-            assert_eq!(file.constraints[0].1.len(), 1);
-            assert_eq!(file.constraints[0].2.len(), 1);
-            assert_eq!(file.constraints[1].0.len(), 1);
-            assert_eq!(file.constraints[1].1.len(), 1);
-            assert_eq!(file.constraints[1].2.len(), 1);
-            assert_eq!(file.constraints[2].0.len(), 1);
-            assert_eq!(file.constraints[2].1.len(), 1);
-            assert_eq!(file.constraints[2].2.len(), 3);
-            assert_eq!(file.constraints[3].0.len(), 1);
-            assert_eq!(file.constraints[3].1.len(), 1);
-            assert_eq!(file.constraints[3].2.len(), 1);
-            assert_eq!(file.constraints[4].0.len(), 1);
-            assert_eq!(file.constraints[4].1.len(), 1);
-            assert_eq!(file.constraints[4].2.len(), 2);
+            assert_eq!(file.constraints[0].a.len(), 1);
+            assert_eq!(file.constraints[0].b.len(), 1);
+            assert_eq!(file.constraints[0].c.len(), 1);
+            assert_eq!(file.constraints[1].a.len(), 1);
+            assert_eq!(file.constraints[1].b.len(), 1);
+            assert_eq!(file.constraints[1].c.len(), 1);
+            assert_eq!(file.constraints[2].a.len(), 1);
+            assert_eq!(file.constraints[2].b.len(), 1);
+            assert_eq!(file.constraints[2].c.len(), 3);
+            assert_eq!(file.constraints[3].a.len(), 1);
+            assert_eq!(file.constraints[3].b.len(), 1);
+            assert_eq!(file.constraints[3].c.len(), 1);
+            assert_eq!(file.constraints[4].a.len(), 1);
+            assert_eq!(file.constraints[4].b.len(), 1);
+            assert_eq!(file.constraints[4].c.len(), 2);
         }
 
         check(
@@ -572,9 +565,9 @@ mod tests {
 
             assert_eq!(file.constraints.len(), 299);
             for i in 0..299 {
-                assert_eq!(file.constraints[i].0.len(), 1);
-                assert_eq!(file.constraints[i].1.len(), 1);
-                assert_eq!(file.constraints[i].2.len(), 1);
+                assert_eq!(file.constraints[i].a.len(), 1);
+                assert_eq!(file.constraints[i].b.len(), 1);
+                assert_eq!(file.constraints[i].c.len(), 1);
             }
 
             for i in 0..=301 {
@@ -610,9 +603,9 @@ mod tests {
 
             assert_eq!(file.constraints.len(), 2499);
             for i in 0..2499 {
-                assert_eq!(file.constraints[i].0.len(), 1);
-                assert_eq!(file.constraints[i].1.len(), 1);
-                assert_eq!(file.constraints[i].2.len(), 2);
+                assert_eq!(file.constraints[i].a.len(), 1);
+                assert_eq!(file.constraints[i].b.len(), 1);
+                assert_eq!(file.constraints[i].c.len(), 2);
             }
         }
         check(

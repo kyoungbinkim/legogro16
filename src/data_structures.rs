@@ -126,7 +126,7 @@ impl<E: PairingEngine> Default for VerifyingKey<E> {
             delta_g2: E::G2Affine::default(),
             gamma_abc_g1: Vec::new(),
             eta_gamma_inv_g1: E::G1Affine::default(),
-            commit_witness_count: 0
+            commit_witness_count: 0,
         }
     }
 }
@@ -250,7 +250,7 @@ pub struct LinkPublicGenerators<E: PairingEngine> {
     pub g2: E::G2Affine,
 }
 
-impl <E: PairingEngine> VerifyingKey<E> {
+impl<E: PairingEngine> VerifyingKey<E> {
     pub fn num_public_inputs(&self) -> usize {
         self.gamma_abc_g1.len() - self.commit_witness_count
     }

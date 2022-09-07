@@ -53,8 +53,8 @@ impl<E: PairingEngine> WitnessCalculator<E> {
                 "Encountered error while loading WASM module from file: {:?}",
                 err
             );
-            CircomError::UnableToLoadWasmModuleFromFile(format!(
-                "Encountered error while loading WASM module from file: {:?}",
+            CircomError::UnableToLoadWasmModuleFromBytes(format!(
+                "Encountered error while loading WASM module from bytes: {:?}",
                 err
             ))
         })?;

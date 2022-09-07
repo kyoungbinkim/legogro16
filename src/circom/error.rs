@@ -23,6 +23,7 @@ pub enum CircomError {
     UnableToOpenR1CSFile(String),
     /// Contains the error message when opening wasm file
     UnableToLoadWasmModuleFromFile(String),
+    UnableToLoadWasmModuleFromBytes(String),
     /// Contains the error message when instantiating WASM module
     WasmInstantiationError(String),
     R1CSFileParsing(String),

@@ -6,13 +6,29 @@ use ark_std::{
     vec::Vec,
 };
 
-use crate::circom::CircomError;
 pub use serialization::*;
 
 /// A linear combination
-pub type LC<E> = Vec<(usize, <E as PairingEngine>::Fr)>;
-/// A single constraint. Comprised of 3 linear combinations
-pub type Constraint<E> = (LC<E>, LC<E>, LC<E>);
+#[derive(Clone, Debug, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
+pub struct LC<E: PairingEngine>(pub Vec<(usize, E::Fr)>);
+
+impl<E: PairingEngine> LC<E> {
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn terms(&self) -> &[(usize, E::Fr)] {
+        &self.0
+    }
+}
+
+/// A single constraint. Comprised of 3 linear combinations as `a * b - c = 0`
+#[derive(Clone, Debug, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
+pub struct Constraint<E: PairingEngine> {
+    pub a: LC<E>,
+    pub b: LC<E>,
+    pub c: LC<E>,
+}
 
 /// Only the following curves are supported.
 #[derive(Clone, Debug, PartialEq)]
@@ -31,14 +47,11 @@ impl Default for Curve {
 #[derive(Clone, Debug, Default, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct R1CS<E: PairingEngine> {
     pub curve: Curve,
-    /// Total number of wires in the circuit. Includes private and public inputs, outputs as well as
-    /// intermediate wires and the wire corresponding to the always present input "1".
-    pub num_variables: usize,
     /// Total number of public values in the circuit. Includes public inputs and outputs and the always
     /// present input "1".
     pub num_public: usize,
     /// Total number of private values in the circuit. Includes the private input as well as the intermediate
-    /// wires. Should always be `num_variables - num_public`
+    /// wires.
     pub num_private: usize,
     pub constraints: Vec<Constraint<E>>,
     /// The indices of the vector specify the wire index and the value specifies the label index
@@ -81,7 +94,6 @@ impl<E: PairingEngine> From<R1CSFile<E>> for R1CS<E> {
             curve: file.header.curve,
             num_private: num_aux,
             num_public: num_inputs,
-            num_variables,
             constraints: file.constraints,
             wire_to_label_mapping: file.wire_mapping.iter().map(|e| *e as usize).collect(),
         }
@@ -90,7 +102,9 @@ impl<E: PairingEngine> From<R1CSFile<E>> for R1CS<E> {
 
 impl<E: PairingEngine> R1CS<E> {
     #[cfg(feature = "std")]
-    pub fn from_file(path: impl AsRef<std::path::Path>) -> Result<Self, CircomError> {
+    pub fn from_file(
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<Self, crate::circom::CircomError> {
         Ok(R1CSFile::new_from_file(path)?.into())
     }
 }
