@@ -460,7 +460,7 @@ pub mod tests {
             let err_1 = wtns
                 .calculate_witnesses::<_>(
                     vec![("a".to_string(), vec![E::Fr::from(3u64)])].into_iter(),
-                    false,
+                    true,
                 )
                 .unwrap_err();
             assert_eq!(err_1, CircomError::IncorrectNumberOfInputsProvided(2, 1));
@@ -468,7 +468,7 @@ pub mod tests {
             let err_2 = wtns
                 .calculate_witnesses::<_>(
                     vec![("b".to_string(), vec![E::Fr::from(3u64)])].into_iter(),
-                    false,
+                    true,
                 )
                 .unwrap_err();
             assert_eq!(err_2, CircomError::IncorrectNumberOfInputsProvided(2, 1));
@@ -476,7 +476,7 @@ pub mod tests {
             let err_3 = wtns
                 .calculate_witnesses::<_>(
                     vec![("x".to_string(), vec![E::Fr::from(3u64)])].into_iter(),
-                    false,
+                    true,
                 )
                 .unwrap_err();
             assert_eq!(
@@ -492,7 +492,7 @@ pub mod tests {
                         ("c".to_string(), vec![E::Fr::from(500u64)]),
                     ]
                     .into_iter(),
-                    false,
+                    true,
                 )
                 .unwrap_err();
             assert_eq!(
@@ -507,7 +507,7 @@ pub mod tests {
                         ("b".to_string(), vec![E::Fr::from(10u64)]),
                     ]
                     .into_iter(),
-                    false,
+                    true,
                 )
                 .unwrap_err();
             assert_eq!(
@@ -522,7 +522,7 @@ pub mod tests {
                         ("b".to_string(), vec![E::Fr::from(10u64)]),
                     ]
                     .into_iter(),
-                    false,
+                    true,
                 )
                 .unwrap_err();
             assert_eq!(
@@ -629,7 +629,7 @@ pub mod tests {
                     let f = v.into_iter().map(|b| big_int_to_ark_fr::<E>(b)).collect();
                     (n, f)
                 }),
-                false,
+                true,
             )
             .unwrap();
         assert_eq!(res.len(), case.wires.len());

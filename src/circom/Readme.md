@@ -38,6 +38,20 @@ For wasm target
 cargo build --no-default-features --features=circom,wasmer-js --target wasm32-unknown-unknown
 ```
 
+## Compiling Circom circuits
+
+For Bn254 curve, compile as 
+
+```
+circom --r1cs --wasm --output=<directory for compiler output for this circuit> <.circom file>
+```
+
+For Bls12-381 curve, compile with `-p` flag as
+
+```
+circom -p=bls12381 --r1cs --wasm --output=<directory for compiler output for this circuit> <.circom file>
+```
+
 ## Test
 
 Tests are run for 2 curves, `bn128` and `bls12-381`. The circuits used in the tests are present in [circuits](../../test-vectors/circuits) 

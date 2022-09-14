@@ -126,14 +126,18 @@ impl<E: PairingEngine> ConstraintSynthesizer<E::Fr> for CircomCircuit<E> {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use crate::circom::tests::{abs_path, gen_params};
     use ark_bls12_381::Bls12_381;
     use ark_bn254::Bn254;
+    use ark_ff::One;
     use ark_relations::r1cs::ConstraintSystem;
+    use ark_std::rand::prelude::StdRng;
+    use ark_std::rand::SeedableRng;
+    use ark_std::UniformRand;
 
-    fn generate_params_and_test_circuit<E: PairingEngine>(
+    pub fn generate_params_and_test_circuit<E: PairingEngine>(
         r1cs_file_path: &str,
         commit_witness_count: usize,
         wires: Option<Vec<E::Fr>>,
@@ -164,6 +168,17 @@ mod tests {
         }
 
         return cs;
+    }
+
+    pub fn set_circuit_wires<E: PairingEngine, I: IntoIterator<Item = (String, Vec<E::Fr>)>>(
+        circuit: &mut CircomCircuit<E>,
+        wasm_file_path: &str,
+        inputs: I,
+    ) {
+        let mut wits_calc = WitnessCalculator::<E>::from_wasm_file(wasm_file_path).unwrap();
+        circuit
+            .set_wires_using_witness_calculator(&mut wits_calc, inputs, true)
+            .unwrap();
     }
 
     #[test]
@@ -410,6 +425,55 @@ mod tests {
             "test-vectors/bls12-381/all_different_10.r1cs",
             10,
             None,
+        );
+    }
+
+    #[test]
+    fn divide_by_24() {
+        fn check<E: PairingEngine, R: RngCore>(
+            r1cs_file_path: &str,
+            wasm_file_path: &str,
+            rng: &mut R,
+        ) {
+            let mut circuit = CircomCircuit::<E>::from_r1cs_file(abs_path(r1cs_file_path)).unwrap();
+
+            let mut non_0_rems = 0;
+
+            for _ in 0..20 {
+                let a = u64::rand(rng);
+                let b = u64::rand(rng);
+                let c = a as u128 * b as u128;
+                let q = c / 24;
+                let r = c % 24;
+                if r > 0 {
+                    non_0_rems += 1;
+                }
+                let mut inputs = std::collections::HashMap::new();
+                inputs.insert("in1".to_string(), vec![E::Fr::from(a)]);
+                inputs.insert("in2".to_string(), vec![E::Fr::from(b)]);
+                set_circuit_wires(&mut circuit, wasm_file_path, inputs.clone());
+
+                let wires = circuit.wires.clone().unwrap();
+                assert!(wires[0].is_one());
+                assert_eq!(wires[1], E::Fr::from(q));
+                assert_eq!(wires[2], E::Fr::from(r));
+
+                generate_params_and_test_circuit::<E>(r1cs_file_path, 2, Some(wires));
+            }
+
+            assert!(non_0_rems > 0);
+        }
+
+        let mut rng = StdRng::seed_from_u64(100);
+        check::<Bn254, _>(
+            "test-vectors/bn128/division.r1cs",
+            "test-vectors/bn128/division.wasm",
+            &mut rng,
+        );
+        check::<Bls12_381, _>(
+            "test-vectors/bls12-381/division.r1cs",
+            "test-vectors/bls12-381/division.wasm",
+            &mut rng,
         );
     }
 }

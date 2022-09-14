@@ -1,3 +1,4 @@
+use crate::circom::circuit::tests::set_circuit_wires;
 use crate::circom::circuit::CircomCircuit;
 use crate::circom::witness::WitnessCalculator;
 use crate::tests::get_link_public_gens;
@@ -8,7 +9,7 @@ use crate::{
 use ark_bls12_381::Bls12_381;
 use ark_bn254::Bn254;
 use ark_ec::PairingEngine;
-use ark_ff::{Field, One, Zero};
+use ark_ff::{Field, One, PrimeField, Zero};
 use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystem};
 use ark_std::rand::prelude::StdRng;
 use ark_std::rand::SeedableRng;
@@ -28,7 +29,7 @@ pub fn gen_params<E: PairingEngine>(
     commit_witness_count: usize,
     circuit: CircomCircuit<E>,
 ) -> (ProvingKeyWithLink<E>, ProvingKey<E>) {
-    let mut rng = StdRng::seed_from_u64(0u64);
+    let mut rng = StdRng::seed_from_u64(0);
     let link_gens = get_link_public_gens(&mut rng, commit_witness_count + 1);
     let params_link = generate_random_parameters_incl_cp_link::<E, _, _>(
         circuit.clone(),
@@ -99,23 +100,12 @@ pub fn generate_params_prove_and_verify<
     println!("Params generated");
 
     let mut wits_calc = WitnessCalculator::<E>::from_wasm_file(wasm_file_path).unwrap();
-    let all_wires = wits_calc.calculate_witnesses::<I>(inputs, false).unwrap();
+    let all_wires = wits_calc.calculate_witnesses::<I>(inputs, true).unwrap();
 
     assert_eq!(wits_calc.instance.get_input_count().unwrap(), num_inputs);
 
     circuit.set_wires(all_wires);
     prove_and_verify_circuit(circuit, &params, commit_witness_count)
-}
-
-fn set_circuit_wires<E: PairingEngine, I: IntoIterator<Item = (String, Vec<E::Fr>)>>(
-    circuit: &mut CircomCircuit<E>,
-    wasm_file_path: &str,
-    inputs: I,
-) {
-    let mut wits_calc = WitnessCalculator::<E>::from_wasm_file(wasm_file_path).unwrap();
-    circuit
-        .set_wires_using_witness_calculator(&mut wits_calc, inputs, false)
-        .unwrap();
 }
 
 fn multiply2<E: PairingEngine>(r1cs_file_path: &str, wasm_file_path: &str) {
@@ -140,7 +130,7 @@ fn multiply2<E: PairingEngine>(r1cs_file_path: &str, wasm_file_path: &str) {
 }
 
 fn test3<E: PairingEngine>(r1cs_file_path: &str, wasm_file_path: &str) {
-    let mut rng = StdRng::seed_from_u64(100u64);
+    let mut rng = StdRng::seed_from_u64(100);
     let x = E::Fr::rand(&mut rng);
     let y = E::Fr::rand(&mut rng);
     let a = E::Fr::rand(&mut rng);
@@ -452,9 +442,6 @@ fn all_different_10<E: PairingEngine>(
         // Make 2 inputs same
         inp[9] = inp[1].clone();
         inputs.insert("in".to_string(), inp.clone());
-        /*let mut wits_calc = WitnessCalculator::<E>::from_wasm_file(wasm_file_path).unwrap();
-        let all_inputs = wits_calc.calculate_witnesses::<_>(inputs, false).unwrap();
-        circuit.wires = Some(all_inputs);*/
         set_circuit_wires(&mut circuit, wasm_file_path, inputs.clone());
         let public = prove_and_verify_circuit(circuit.clone(), &params, commit_witness_count);
         assert_eq!(public.len(), 1);
@@ -542,6 +529,316 @@ fn less_than_public_64_bits<E: PairingEngine>(
         assert!(public[0].is_zero());
         assert_eq!(public[1], a);
     }
+}
+
+fn average_n<E: PairingEngine>(r1cs_file_path: &str, wasm_file_path: &str, n: u64) {
+    let mut circuit = CircomCircuit::<E>::from_r1cs_file(abs_path(r1cs_file_path)).unwrap();
+
+    let (_, params) = gen_params::<E>(n as usize, circuit.clone());
+
+    let mut rng = StdRng::seed_from_u64(100);
+
+    let mut inp = vec![];
+    let mut sum = 0u128;
+    for _ in 0..n {
+        let e = u64::rand(&mut rng);
+        sum += e as u128;
+        inp.push(E::Fr::from(e));
+    }
+
+    let mut inputs = HashMap::new();
+    inputs.insert("in".to_string(), inp);
+
+    set_circuit_wires(&mut circuit, wasm_file_path, inputs.clone());
+    let public = prove_and_verify_circuit(circuit.clone(), &params, n as usize);
+
+    assert_eq!(public.len(), 1);
+    assert_eq!(public[0], E::Fr::from(sum / n as u128));
+}
+
+fn average_n_less_than_public<E: PairingEngine>(
+    r1cs_file_path: &str,
+    wasm_file_path: &str,
+    n: u64,
+) {
+    let mut circuit = CircomCircuit::<E>::from_r1cs_file(abs_path(r1cs_file_path)).unwrap();
+
+    let (_, params) = gen_params::<E>(n as usize, circuit.clone());
+
+    let mut rng = StdRng::seed_from_u64(100);
+
+    let mut inp = vec![];
+    let mut inp_ = vec![];
+    let mut sum = 0u128;
+    for _ in 0..n {
+        let e = u64::rand(&mut rng);
+        sum += e as u128;
+        inp_.push(e);
+        inp.push(E::Fr::from(e));
+    }
+
+    let max = (sum / n as u128) + 1;
+
+    let mut inputs = HashMap::new();
+    inputs.insert("in".to_string(), inp);
+    inputs.insert("max".to_string(), vec![E::Fr::from(max)]);
+
+    set_circuit_wires(&mut circuit, wasm_file_path, inputs.clone());
+    for w in circuit.wires.clone().unwrap().into_iter().take(10) {
+        println!("{:?}", w.into_repr());
+    }
+
+    let public = prove_and_verify_circuit(circuit.clone(), &params, n as usize);
+
+    assert_eq!(public.len(), 2);
+    assert_eq!(public[0], E::Fr::from(1u64));
+    assert_eq!(public[1], E::Fr::from(max));
+
+    // Using a number greater than 64-bit shouldn't work as the circuit only supports 64 bit inputs
+    let greater_than_64_bit = E::Fr::from(u64::MAX) + E::Fr::from(10u64);
+    let mut sum = greater_than_64_bit.clone();
+    let mut inp = vec![];
+    inp.push(greater_than_64_bit);
+    for i in 1..n {
+        inp.push(E::Fr::from(i));
+        sum += inp[i as usize];
+    }
+
+    let max = sum;
+    let mut inputs = HashMap::new();
+    inputs.insert("in".to_string(), inp);
+    inputs.insert("max".to_string(), vec![max]);
+    set_circuit_wires(&mut circuit, wasm_file_path, inputs.clone());
+    let cs = ConstraintSystem::<E::Fr>::new_ref();
+    circuit.clone().generate_constraints(cs.clone()).unwrap();
+    assert!(!cs.is_satisfied().unwrap());
+}
+
+fn sum_n_less_than_public<E: PairingEngine>(r1cs_file_path: &str, wasm_file_path: &str, n: u64) {
+    let mut circuit = CircomCircuit::<E>::from_r1cs_file(abs_path(r1cs_file_path)).unwrap();
+
+    let (_, params) = gen_params::<E>(n as usize, circuit.clone());
+
+    let mut rng = StdRng::seed_from_u64(100);
+
+    let mut inp = vec![];
+    let mut sum = 0u128;
+    for _ in 1..=n {
+        let e = u64::rand(&mut rng);
+        sum += e as u128;
+        inp.push(E::Fr::from(e));
+    }
+    let max = sum + 1;
+
+    let mut inputs = HashMap::new();
+    inputs.insert("in".to_string(), inp);
+    inputs.insert("max".to_string(), vec![E::Fr::from(max)]);
+
+    set_circuit_wires(&mut circuit, wasm_file_path, inputs.clone());
+    let public = prove_and_verify_circuit(circuit.clone(), &params, n as usize);
+
+    assert_eq!(public.len(), 2);
+    assert_eq!(public[0], E::Fr::from(1u64));
+    assert_eq!(public[1], E::Fr::from(max));
+
+    // Using a very large input shouldn't work even when it will make the sum smaller than max
+    let p_minus_5 = E::Fr::from(0u64) - E::Fr::from(5u64); // curve order - 5
+    let mut inp = vec![];
+    inp.push(p_minus_5);
+    for i in 1..n {
+        inp.push(E::Fr::from(i));
+    }
+    let max = E::Fr::from(300u64);
+    let mut inputs = HashMap::new();
+    inputs.insert("in".to_string(), inp);
+    inputs.insert("max".to_string(), vec![max]);
+
+    set_circuit_wires(&mut circuit, wasm_file_path, inputs.clone());
+    let cs = ConstraintSystem::<E::Fr>::new_ref();
+    circuit.clone().generate_constraints(cs.clone()).unwrap();
+    assert!(!cs.is_satisfied().unwrap());
+}
+
+fn set_membership<E: PairingEngine>(r1cs_file_path: &str, wasm_file_path: &str, set_size: u64) {
+    let mut circuit = CircomCircuit::<E>::from_r1cs_file(abs_path(r1cs_file_path)).unwrap();
+
+    let (_, params) = gen_params::<E>(1, circuit.clone());
+
+    let mut rng = StdRng::seed_from_u64(0);
+
+    let x = E::Fr::rand(&mut rng);
+    let mut set = vec![];
+    for _ in 1..set_size {
+        let e = E::Fr::rand(&mut rng);
+        set.push(e);
+    }
+    set.push(x);
+
+    let mut inputs = HashMap::new();
+    inputs.insert("x".to_string(), vec![x]);
+    inputs.insert("set".to_string(), set.clone());
+
+    set_circuit_wires(&mut circuit, wasm_file_path, inputs.clone());
+    let public = prove_and_verify_circuit(circuit.clone(), &params, 1);
+
+    assert_eq!(public.len(), 6);
+    assert_eq!(public[0], E::Fr::one());
+    for i in 0..set_size as usize {
+        assert_eq!(public[i + 1], set[i]);
+    }
+
+    let mut set = vec![];
+    for _ in 0..set_size {
+        let e = E::Fr::rand(&mut rng);
+        assert!(x != e);
+        set.push(e);
+    }
+
+    let mut inputs = HashMap::new();
+    inputs.insert("x".to_string(), vec![x]);
+    inputs.insert("set".to_string(), set.clone());
+
+    set_circuit_wires(&mut circuit, wasm_file_path, inputs.clone());
+    let public = prove_and_verify_circuit(circuit.clone(), &params, 1);
+
+    assert_eq!(public.len(), 6);
+    assert_eq!(public[0], E::Fr::zero());
+    for i in 0..set_size as usize {
+        assert_eq!(public[i + 1], set[i]);
+    }
+}
+
+fn difference_of_array_sum<E: PairingEngine>(
+    r1cs_file_path: &str,
+    wasm_file_path: &str,
+    arr1_size: u64,
+    arr2_size: u64,
+) {
+    let mut circuit = CircomCircuit::<E>::from_r1cs_file(abs_path(r1cs_file_path)).unwrap();
+
+    let commit_witness_count = (arr1_size + arr2_size) as usize;
+    let (_, params) = gen_params::<E>(commit_witness_count, circuit.clone());
+
+    let mut rng = StdRng::seed_from_u64(0);
+
+    let mut inp1 = vec![];
+    let mut sum1 = 0u128;
+    for _ in 0..arr1_size {
+        let e = u64::rand(&mut rng);
+        sum1 += e as u128;
+        inp1.push(E::Fr::from(e));
+    }
+
+    let mut inp2 = vec![];
+    let mut sum2 = 0u128;
+    for _ in 0..arr2_size {
+        let e = u64::rand(&mut rng);
+        sum2 += e as u128;
+        inp2.push(E::Fr::from(e));
+    }
+
+    assert_ne!(sum2, sum1);
+
+    let (inp_a, inp_b, sum_a, sum_b) = if sum2 > sum1 {
+        (&inp2, &inp1, sum2, sum1)
+    } else {
+        (&inp1, &inp2, sum1, sum2)
+    };
+
+    // Expecting some difference
+    assert!((sum_a - sum_b) > 1);
+    let min = sum_a - sum_b - 1u128;
+
+    let mut inputs = HashMap::new();
+    inputs.insert("inA".to_string(), inp_a.to_vec());
+    inputs.insert("inB".to_string(), inp_b.to_vec());
+    inputs.insert("min".to_string(), vec![E::Fr::from(min)]);
+
+    set_circuit_wires(&mut circuit, wasm_file_path, inputs.clone());
+    let public = prove_and_verify_circuit(circuit.clone(), &params, commit_witness_count);
+
+    assert_eq!(public.len(), 2);
+    assert_eq!(public[0], E::Fr::from(1u64));
+    assert_eq!(public[1], E::Fr::from(min));
+}
+
+fn greater_than_or_public<E: PairingEngine>(r1cs_file_path: &str, wasm_file_path: &str) {
+    let mut circuit = CircomCircuit::<E>::from_r1cs_file(abs_path(r1cs_file_path)).unwrap();
+
+    let commit_witness_count = 2;
+    let (_, params) = gen_params::<E>(commit_witness_count, circuit.clone());
+
+    let mut rng = StdRng::seed_from_u64(0);
+    let a = u64::rand(&mut rng);
+    let b = u64::rand(&mut rng);
+    let c = u64::rand(&mut rng);
+    let d = u64::rand(&mut rng);
+
+    assert_ne!(a, b);
+    assert_ne!(c, d);
+
+    let (big1, small1) = if a > b { (a, b) } else { (b, a) };
+    let (big2, small2) = if c > d { (c, d) } else { (d, c) };
+
+    // Both greater than checks satisfy
+    let mut inputs = HashMap::new();
+    inputs.insert("in1".to_string(), vec![E::Fr::from(big1)]);
+    inputs.insert("in2".to_string(), vec![E::Fr::from(big2)]);
+    inputs.insert("in3".to_string(), vec![E::Fr::from(small1)]);
+    inputs.insert("in4".to_string(), vec![E::Fr::from(small2)]);
+
+    set_circuit_wires(&mut circuit, wasm_file_path, inputs.clone());
+    let public = prove_and_verify_circuit(circuit.clone(), &params, commit_witness_count);
+
+    assert_eq!(public.len(), 3);
+    assert_eq!(public[0], E::Fr::from(1u64));
+    assert_eq!(public[1], E::Fr::from(small1));
+    assert_eq!(public[2], E::Fr::from(small2));
+
+    // Only 1st greater than check satisfies
+    let mut inputs = HashMap::new();
+    inputs.insert("in1".to_string(), vec![E::Fr::from(big1)]);
+    inputs.insert("in2".to_string(), vec![E::Fr::from(small2)]);
+    inputs.insert("in3".to_string(), vec![E::Fr::from(small1)]);
+    inputs.insert("in4".to_string(), vec![E::Fr::from(big2)]);
+
+    set_circuit_wires(&mut circuit, wasm_file_path, inputs.clone());
+    let public = prove_and_verify_circuit(circuit.clone(), &params, commit_witness_count);
+
+    assert_eq!(public.len(), 3);
+    assert_eq!(public[0], E::Fr::from(1u64));
+    assert_eq!(public[1], E::Fr::from(small1));
+    assert_eq!(public[2], E::Fr::from(big2));
+
+    // Only 2nd greater than check satisfies
+    let mut inputs = HashMap::new();
+    inputs.insert("in1".to_string(), vec![E::Fr::from(small1)]);
+    inputs.insert("in2".to_string(), vec![E::Fr::from(big2)]);
+    inputs.insert("in3".to_string(), vec![E::Fr::from(big1)]);
+    inputs.insert("in4".to_string(), vec![E::Fr::from(small2)]);
+
+    set_circuit_wires(&mut circuit, wasm_file_path, inputs.clone());
+    let public = prove_and_verify_circuit(circuit.clone(), &params, commit_witness_count);
+
+    assert_eq!(public.len(), 3);
+    assert_eq!(public[0], E::Fr::from(1u64));
+    assert_eq!(public[1], E::Fr::from(big1));
+    assert_eq!(public[2], E::Fr::from(small2));
+
+    // Both greater than checks fail
+    let mut inputs = HashMap::new();
+    inputs.insert("in1".to_string(), vec![E::Fr::from(small1)]);
+    inputs.insert("in2".to_string(), vec![E::Fr::from(small2)]);
+    inputs.insert("in3".to_string(), vec![E::Fr::from(big1)]);
+    inputs.insert("in4".to_string(), vec![E::Fr::from(big2)]);
+
+    set_circuit_wires(&mut circuit, wasm_file_path, inputs.clone());
+    let public = prove_and_verify_circuit(circuit.clone(), &params, commit_witness_count);
+
+    assert_eq!(public.len(), 3);
+    assert_eq!(public[0], E::Fr::from(0u64));
+    assert_eq!(public[1], E::Fr::from(big1));
+    assert_eq!(public[2], E::Fr::from(big2));
 }
 
 #[test]
@@ -749,4 +1046,116 @@ fn less_than_public_64_bits_bls12_381() {
     let r1cs_file_path = "test-vectors/bls12-381/less_than_public_64.r1cs";
     let wasm_file_path = "test-vectors/bls12-381/less_than_public_64.wasm";
     less_than_public_64_bits::<Bls12_381>(r1cs_file_path, wasm_file_path, 1);
+}
+
+#[test]
+fn average_12() {
+    average_n::<Bn254>(
+        "test-vectors/bn128/average_12.r1cs",
+        "test-vectors/bn128/average_12.wasm",
+        12,
+    );
+    average_n::<Bls12_381>(
+        "test-vectors/bls12-381/average_12.r1cs",
+        "test-vectors/bls12-381/average_12.wasm",
+        12,
+    );
+}
+
+#[test]
+fn average_24() {
+    average_n::<Bn254>(
+        "test-vectors/bn128/average_24.r1cs",
+        "test-vectors/bn128/average_24.wasm",
+        24,
+    );
+    average_n::<Bls12_381>(
+        "test-vectors/bls12-381/average_24.r1cs",
+        "test-vectors/bls12-381/average_24.wasm",
+        24,
+    );
+}
+
+#[test]
+fn average_12_less_than_public() {
+    average_n_less_than_public::<Bn254>(
+        "test-vectors/bn128/average_12_less_than_public.r1cs",
+        "test-vectors/bn128/average_12_less_than_public.wasm",
+        12,
+    );
+    average_n_less_than_public::<Bls12_381>(
+        "test-vectors/bls12-381/average_12_less_than_public.r1cs",
+        "test-vectors/bls12-381/average_12_less_than_public.wasm",
+        12,
+    );
+}
+
+#[test]
+fn average_24_less_than_public() {
+    average_n_less_than_public::<Bn254>(
+        "test-vectors/bn128/average_24_less_than_public.r1cs",
+        "test-vectors/bn128/average_24_less_than_public.wasm",
+        24,
+    );
+    average_n_less_than_public::<Bls12_381>(
+        "test-vectors/bls12-381/average_24_less_than_public.r1cs",
+        "test-vectors/bls12-381/average_24_less_than_public.wasm",
+        24,
+    );
+}
+
+#[test]
+fn sum_12_less_than_public() {
+    sum_n_less_than_public::<Bn254>(
+        "test-vectors/bn128/sum_12_less_than_public.r1cs",
+        "test-vectors/bn128/sum_12_less_than_public.wasm",
+        12,
+    );
+    sum_n_less_than_public::<Bls12_381>(
+        "test-vectors/bls12-381/sum_12_less_than_public.r1cs",
+        "test-vectors/bls12-381/sum_12_less_than_public.wasm",
+        12,
+    );
+}
+
+#[test]
+fn set_membership_5_public() {
+    set_membership::<Bn254>(
+        "test-vectors/bn128/set_membership_5_public.r1cs",
+        "test-vectors/bn128/set_membership_5_public.wasm",
+        5,
+    );
+    set_membership::<Bls12_381>(
+        "test-vectors/bls12-381/set_membership_5_public.r1cs",
+        "test-vectors/bls12-381/set_membership_5_public.wasm",
+        5,
+    );
+}
+
+#[test]
+fn difference_of_array_sum_20_20() {
+    difference_of_array_sum::<Bn254>(
+        "test-vectors/bn128/difference_of_array_sum_20_20.r1cs",
+        "test-vectors/bn128/difference_of_array_sum_20_20.wasm",
+        20,
+        20,
+    );
+    difference_of_array_sum::<Bls12_381>(
+        "test-vectors/bls12-381/difference_of_array_sum_20_20.r1cs",
+        "test-vectors/bls12-381/difference_of_array_sum_20_20.wasm",
+        20,
+        20,
+    );
+}
+
+#[test]
+fn greater_than_or_public_64() {
+    greater_than_or_public::<Bn254>(
+        "test-vectors/bn128/greater_than_or_public_64.r1cs",
+        "test-vectors/bn128/greater_than_or_public_64.wasm",
+    );
+    greater_than_or_public::<Bls12_381>(
+        "test-vectors/bls12-381/greater_than_or_public_64.r1cs",
+        "test-vectors/bls12-381/greater_than_or_public_64.wasm",
+    );
 }
