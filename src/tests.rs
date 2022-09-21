@@ -12,6 +12,7 @@ use ark_std::{
 
 use core::ops::MulAssign;
 
+use crate::error::Error;
 use crate::prover::verify_commitments;
 use ark_relations::r1cs::Variable;
 use ark_relations::{
@@ -149,15 +150,28 @@ fn test_prove_and_verify<E>(n_iters: usize)
 where
     E: PairingEngine,
 {
-    let mut rng = StdRng::seed_from_u64(0u64);
-    let circuit = MySillyCircuit { a: None, b: None };
-
-    // Commit to both witnesses `a` and `b` in the proof
-    {
-        let commit_witness_count = 2;
+    fn run<E: PairingEngine>(n_iters: usize, commit_witness_count: usize) {
+        let mut rng = StdRng::seed_from_u64(0u64);
+        let circuit = MySillyCircuit { a: None, b: None };
 
         // Generators for committing to witnesses and 1 more for randomness (`link_v` below)
         let link_gens = get_link_public_gens(&mut rng, commit_witness_count + 1);
+
+        assert_eq!(
+            generate_random_parameters_incl_cp_link::<E, _, _>(
+                circuit.clone(),
+                link_gens.clone(),
+                3,
+                &mut rng,
+            )
+            .unwrap_err(),
+            Error::InsufficientWitnessesForCommitment(2, 3)
+        );
+
+        assert_eq!(
+            generate_random_parameters::<E, _, _>(circuit.clone(), 3, &mut rng).unwrap_err(),
+            Error::InsufficientWitnessesForCommitment(2, 3)
+        );
 
         // Parameters for generating proof containing CP_link as well
         let params_link = generate_random_parameters_incl_cp_link::<E, _, _>(
@@ -206,18 +220,27 @@ where
             let proof = create_random_proof(circuit, v, &params, &mut rng).unwrap();
 
             // Prover verifies the openings of the commitments in both proof.d and CP_link
-            verify_commitments(&params_link.vk, &proof_link, 1, &[a, b], &v, &link_v).unwrap();
-            assert!(
-                verify_commitments(&params_link.vk, &proof_link, 1, &[a], &v, &link_v).is_err()
-            );
-            assert!(
-                verify_commitments(&params_link.vk, &proof_link, 2, &[a, b], &v, &link_v).is_err()
-            );
-
-            // Prover verifies the openings of the commitments in proof.d
-            verify_witness_commitment(&params.vk, &proof, 1, &[a, b], &v).unwrap();
-            assert!(verify_witness_commitment(&params.vk, &proof, 1, &[a], &v).is_err());
-            assert!(verify_witness_commitment(&params.vk, &proof, 2, &[a, b], &v).is_err());
+            if commit_witness_count == 2 {
+                verify_commitments(&params_link.vk, &proof_link, 1, &[a, b], &v, &link_v).unwrap();
+                assert!(
+                    verify_commitments(&params_link.vk, &proof_link, 1, &[a], &v, &link_v).is_err()
+                );
+                assert!(
+                    verify_commitments(&params_link.vk, &proof_link, 2, &[a, b], &v, &link_v)
+                        .is_err()
+                );
+            }
+            if commit_witness_count == 1 {
+                verify_witness_commitment(&params.vk, &proof, 1, &[a], &v).unwrap();
+                assert!(verify_witness_commitment(&params.vk, &proof, 1, &[a, b], &v).is_err());
+                assert!(verify_witness_commitment(&params.vk, &proof, 2, &[a], &v).is_err());
+            }
+            if commit_witness_count == 0 {
+                verify_witness_commitment(&params.vk, &proof, 1, &[], &v).unwrap();
+                assert!(verify_witness_commitment(&params.vk, &proof, 1, &[a, b], &v).is_err());
+                assert!(verify_witness_commitment(&params.vk, &proof, 1, &[a], &v).is_err());
+                assert!(verify_witness_commitment(&params.vk, &proof, 2, &[], &v).is_err());
+            }
 
             // Verify LegoGroth16 proof and CP_link proof
             verify_proof_incl_cp_link(&pvk_link, &params_link.vk, &proof_link, &[c]).unwrap();
@@ -231,83 +254,12 @@ where
         }
     }
 
+    // Commit to both witnesses `a` and `b` in the proof
+    run::<E>(n_iters, 2);
     // Commit to only 1 witness `a` in the proof
-    {
-        let commit_witness_count = 1;
-
-        // Generators for committing to witnesses and 1 more for randomness (`link_v` below)
-        let link_gens = get_link_public_gens(&mut rng, commit_witness_count + 1);
-
-        // Parameters for generating proof containing CP_link as well
-        let params_link = generate_random_parameters_incl_cp_link::<E, _, _>(
-            circuit.clone(),
-            link_gens.clone(),
-            commit_witness_count,
-            &mut rng,
-        )
-        .unwrap();
-        // Parameters for generating proof without CP_link
-        let params =
-            generate_random_parameters::<E, _, _>(circuit, commit_witness_count, &mut rng).unwrap();
-
-        // Verifying key for LegoGroth16 including the link public params
-        let pvk_link = prepare_verifying_key::<E>(&params_link.vk.groth16_vk);
-        // Verifying key for LegoGroth16
-        let pvk = prepare_verifying_key::<E>(&params.vk);
-
-        for _ in 0..n_iters {
-            let a = E::Fr::rand(&mut rng);
-            let b = E::Fr::rand(&mut rng);
-            let mut c = a;
-            c.mul_assign(&b);
-
-            // Randomness for the committed witness in proof.d
-            let v = E::Fr::rand(&mut rng);
-            // Randomness for the committed witness in CP_link
-            let link_v = E::Fr::rand(&mut rng);
-
-            let circuit = MySillyCircuit {
-                a: Some(a),
-                b: Some(b),
-            };
-
-            // Create a LegoGro16 proof with CP_link.
-            let proof_link = create_random_proof_incl_cp_link(
-                circuit.clone(),
-                v,
-                link_v,
-                &params_link,
-                &mut rng,
-            )
-            .unwrap();
-            // Create a LegoGro16 proof without CP_link.
-            let proof = create_random_proof(circuit, v, &params, &mut rng).unwrap();
-
-            // Prover verifies the openings of the commitments in both proof.d and CP_link
-            verify_commitments(&params_link.vk, &proof_link, 1, &[a], &v, &link_v).unwrap();
-            assert!(
-                verify_commitments(&params_link.vk, &proof_link, 1, &[a, b], &v, &link_v).is_err()
-            );
-            assert!(
-                verify_commitments(&params_link.vk, &proof_link, 2, &[a], &v, &link_v).is_err()
-            );
-
-            // Prover verifies the openings of the commitments in proof.d
-            verify_witness_commitment(&params.vk, &proof, 1, &[a], &v).unwrap();
-            assert!(verify_witness_commitment(&params.vk, &proof, 1, &[a, b], &v).is_err());
-            assert!(verify_witness_commitment(&params.vk, &proof, 2, &[a], &v).is_err());
-
-            // Verify LegoGroth16 proof and CP_link proof
-            verify_proof_incl_cp_link(&pvk_link, &params_link.vk, &proof_link, &[c]).unwrap();
-            assert!(
-                verify_proof_incl_cp_link(&pvk_link, &params_link.vk, &proof_link, &[]).is_err()
-            );
-
-            // Verify LegoGroth16 proof
-            verify_proof(&pvk, &proof, &[c]).unwrap();
-            assert!(verify_proof(&pvk, &proof, &[]).is_err());
-        }
-    }
+    run::<E>(n_iters, 1);
+    // Don't commit to any witness in the proof
+    run::<E>(n_iters, 0);
 }
 
 fn test_prove_and_verify_1<E>(n_iters: usize)
@@ -530,5 +482,45 @@ mod cp6_782 {
     #[test]
     fn prove_and_verify_2() {
         test_prove_and_verify_2::<CP6_782>(1);
+    }
+}
+
+mod bls12_381 {
+    use super::*;
+    use ark_bls12_381::Bls12_381;
+
+    #[test]
+    fn prove_and_verify() {
+        test_prove_and_verify::<Bls12_381>(10);
+    }
+
+    #[test]
+    fn prove_and_verify_1() {
+        test_prove_and_verify_1::<Bls12_381>(10);
+    }
+
+    #[test]
+    fn prove_and_verify_2() {
+        test_prove_and_verify_2::<Bls12_381>(10);
+    }
+}
+
+mod bn254 {
+    use super::*;
+    use ark_bn254::Bn254;
+
+    #[test]
+    fn prove_and_verify() {
+        test_prove_and_verify::<Bn254>(10);
+    }
+
+    #[test]
+    fn prove_and_verify_1() {
+        test_prove_and_verify_1::<Bn254>(10);
+    }
+
+    #[test]
+    fn prove_and_verify_2() {
+        test_prove_and_verify_2::<Bn254>(10);
     }
 }

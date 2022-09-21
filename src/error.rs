@@ -1,7 +1,9 @@
+#[cfg(feature = "circom")]
+use crate::circom::error::CircomError;
 use crate::link::error::LinkError;
 use ark_relations::r1cs::SynthesisError;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Error {
     SynthesisError(SynthesisError),
     LinkError(LinkError),
@@ -9,6 +11,9 @@ pub enum Error {
     InvalidProof,
     InvalidLinkCommitment,
     InvalidWitnessCommitment,
+    InsufficientWitnessesForCommitment(usize, usize),
+    #[cfg(feature = "circom")]
+    CircomError(CircomError),
 }
 
 impl From<SynthesisError> for Error {
@@ -20,5 +25,12 @@ impl From<SynthesisError> for Error {
 impl From<LinkError> for Error {
     fn from(e: LinkError) -> Self {
         Self::LinkError(e)
+    }
+}
+
+#[cfg(feature = "circom")]
+impl From<CircomError> for Error {
+    fn from(e: CircomError) -> Self {
+        Self::CircomError(e)
     }
 }

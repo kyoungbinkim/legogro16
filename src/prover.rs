@@ -284,8 +284,8 @@ where
         .map(|s| s.into_repr())
         .collect::<Vec<_>>();
 
-    let committed_witnesses = &aux_assignment[..pk_common.commit_witness_count];
-    let uncommitted_witnesses = &aux_assignment[pk_common.commit_witness_count..];
+    let committed_witnesses = &aux_assignment[..vk.commit_witness_count];
+    let uncommitted_witnesses = &aux_assignment[vk.commit_witness_count..];
 
     let l_aux_acc = VariableBaseMSM::multi_scalar_mul(&pk_common.l_query, uncommitted_witnesses);
 
@@ -355,7 +355,7 @@ where
     g_d += &v_eta_gamma_inv;
     end_timer!(d_acc_time);
 
-    let committed_witnesses = witness_assignment[..pk_common.commit_witness_count].to_vec();
+    let committed_witnesses = witness_assignment[..vk.commit_witness_count].to_vec();
     drop(aux_assignment);
 
     Ok((

@@ -11,15 +11,13 @@
 )]
 
 // For randomness (during paramgen and proof generation)
-use ark_std::{rand::Rng, UniformRand};
+use ark_std::UniformRand;
 
 // For benchmarking
 use std::time::{Duration, Instant};
 
 // Bring in some tools for using pairing-friendly curves
-// We're going to use the BLS12-377 pairing-friendly elliptic curve.
-use ark_bls12_377::{Bls12_377, Fr};
-use ark_ec::ProjectiveCurve;
+use ark_ec::{PairingEngine, ProjectiveCurve};
 use ark_ff::Field;
 
 // We'll use these interfaces to construct our circuit.
@@ -149,8 +147,7 @@ impl<'a, F: Field> ConstraintSynthesizer<F> for MiMCDemo<'a, F> {
     }
 }
 
-#[test]
-fn test_mimc_legogroth16() {
+fn mimc_legogroth16<E: PairingEngine>() {
     // We're going to use the LegoGroth16 proving system.
     // This proof has a commitment to both left and right inputs
 
@@ -164,30 +161,32 @@ fn test_mimc_legogroth16() {
     let mut rng = StdRng::seed_from_u64(0u64);
 
     // Generate the MiMC round constants
-    let constants = (0..MIMC_ROUNDS).map(|_| rng.gen()).collect::<Vec<_>>();
+    let constants = (0..MIMC_ROUNDS)
+        .map(|_| E::Fr::rand(&mut rng))
+        .collect::<Vec<_>>();
 
     println!("Creating parameters...");
 
     // Need 3 bases, 2 for witnesses xl and xr and 1 for randomness (link_v)
     let pedersen_gens = (0..3)
-        .map(|_| ark_bls12_377::G1Projective::rand(&mut rng).into_affine())
+        .map(|_| E::G1Projective::rand(&mut rng).into_affine())
         .collect::<Vec<_>>();
-    let g1 = ark_bls12_377::G1Projective::rand(&mut rng).into_affine();
-    let g2 = ark_bls12_377::G2Projective::rand(&mut rng).into_affine();
+    let g1 = E::G1Projective::rand(&mut rng).into_affine();
+    let g2 = E::G2Projective::rand(&mut rng).into_affine();
     let link_gens = LinkPublicGenerators {
         pedersen_gens,
         g1,
         g2,
     };
 
-    let c = MiMCDemo::<Fr> {
+    let c = MiMCDemo::<E::Fr> {
         xl: None,
         xr: None,
         constants: &constants,
     };
 
     // Parameters for generating proof containing CP_link as well
-    let params_link = generate_random_parameters_incl_cp_link::<Bls12_377, _, _>(
+    let params_link = generate_random_parameters_incl_cp_link::<E, _, _>(
         c.clone(),
         link_gens.clone(),
         2,
@@ -195,7 +194,7 @@ fn test_mimc_legogroth16() {
     )
     .unwrap();
     // Parameters for generating proof without CP_link
-    let params = generate_random_parameters::<Bls12_377, _, _>(c, 2, &mut rng).unwrap();
+    let params = generate_random_parameters::<E, _, _>(c, 2, &mut rng).unwrap();
 
     // Verifying key for LegoGroth16 including the link public params
     let pvk_link = prepare_verifying_key(&params_link.vk.groth16_vk);
@@ -213,8 +212,8 @@ fn test_mimc_legogroth16() {
 
     for _ in 0..SAMPLES {
         // Generate a random preimage and compute the image
-        let xl = rng.gen();
-        let xr = rng.gen();
+        let xl = E::Fr::rand(&mut rng);
+        let xr = E::Fr::rand(&mut rng);
         let image = mimc(xl, xr, &constants);
 
         {
@@ -227,9 +226,9 @@ fn test_mimc_legogroth16() {
             };
 
             // Randomness for the committed witness in proof.d
-            let v = Fr::rand(&mut rng);
+            let v = E::Fr::rand(&mut rng);
             // Randomness for the committed witness in CP_link
-            let link_v = Fr::rand(&mut rng);
+            let link_v = E::Fr::rand(&mut rng);
 
             let start = Instant::now();
             // Create a LegoGro16 proof with CP_link.
@@ -287,4 +286,34 @@ fn test_mimc_legogroth16() {
     );
     println!("Average proving time: {:?} seconds", proving_avg);
     println!("Average verifying time: {:?} seconds", verifying_avg);
+}
+
+mod bls12_377 {
+    use super::*;
+    use ark_bls12_377::Bls12_377;
+
+    #[test]
+    fn test_mimc_legogroth16() {
+        mimc_legogroth16::<Bls12_377>();
+    }
+}
+
+mod bls12_381 {
+    use super::*;
+    use ark_bls12_381::Bls12_381;
+
+    #[test]
+    fn test_mimc_legogroth16() {
+        mimc_legogroth16::<Bls12_381>();
+    }
+}
+
+mod bn254 {
+    use super::*;
+    use ark_bn254::Bn254;
+
+    #[test]
+    fn test_mimc_legogroth16() {
+        mimc_legogroth16::<Bn254>();
+    }
 }

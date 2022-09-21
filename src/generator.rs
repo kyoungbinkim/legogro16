@@ -286,7 +286,12 @@ where
     ///////////////////////////////////////////////////////////////////////////
 
     let num_instance_variables = cs.num_instance_variables();
-    assert!(cs.num_witness_variables() >= commit_witness_count);
+    if cs.num_witness_variables() < commit_witness_count {
+        return Err(crate::error::Error::InsufficientWitnessesForCommitment(
+            cs.num_witness_variables(),
+            commit_witness_count,
+        ));
+    }
 
     let n = num_instance_variables + commit_witness_count;
 
@@ -423,6 +428,7 @@ where
         delta_g2: delta_g2.into_affine(),
         gamma_abc_g1: gamma_abc_g1_affine,
         eta_gamma_inv_g1: eta_gamma_inv_g1_affine,
+        commit_witness_count,
     };
 
     let batch_normalization_time = start_timer!(|| "Convert proving key elements to affine");
@@ -445,7 +451,6 @@ where
         b_g2_query,
         h_query,
         l_query,
-        commit_witness_count,
     };
     Ok((ProvingKey { vk, common }, num_instance_variables))
 }

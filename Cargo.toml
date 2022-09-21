@@ -1,10 +1,10 @@
 [package]
 name = "legogroth16"
-version = "0.2.0"
+version = "0.3.0"
 authors = [ "arkworks contributors", "Dock.io" ]
 description = "An implementation of the LegoGroth16, the Legosnark variant of Groth16 zkSNARK proof system"
 repository = "https://github.com/lovesh/legogroth16"
-keywords = [ "zero-knowledge", "cryptography", "zkSNARK", "SNARK", "Groth16" ]
+keywords = [ "zero-knowledge", "cryptography", "zkSNARK", "SNARK", "Groth16", "LegoSNARK", "LegoGroth16", "Circom" ]
 categories = [ "cryptography" ]
 include = ["Cargo.toml", "src", "README.md", "LICENSE-APACHE", "LICENSE-MIT"]
 license = "MIT/Apache-2.0"
@@ -23,9 +23,14 @@ ark-r1cs-std = { version = "^0.3.1", default-features = false, optional = true }
 tracing = { version = "0.1", default-features = false, features = [ "attributes" ], optional = true }
 derivative = { version = "2.0", features = ["use_core"], optional = true}
 rayon = { version = "1", optional = true }
+wasmer = { version = "2.3.0", optional = true, default-features = false }
+fnv = { version = "1.0.3", default-features = false, optional = true }
+num-bigint = { version = "0.4", default-features = false, optional = true }
+log = "0.4"
 
 [dev-dependencies]
 csv = { version = "1" }
+ark-bn254 = { version = "^0.3.0", default-features = false, features = ["curve"] }
 ark-bls12-381 = { version = "^0.3.0", default-features = false, features = ["curve"] }
 ark-bls12-377 = { version = "^0.3.0", default-features = false, features = ["curve"] }
 ark-cp6-782 = { version = "^0.3.0", default-features = false }
@@ -35,15 +40,17 @@ ark-mnt4-753 = { version = "^0.3.0", default-features = false, features = ["r1cs
 ark-mnt6-753 = { version = "^0.3.0", default-features = false, features = ["r1cs"] }
 tracing = { version = "0.1", default-features = false, features = [ "attributes" ] }
 tracing-subscriber = { version = "0.2" }
+hex-literal = "0.2.1"
+serde_json = "1.0.64"
 
 [profile.release]
 lto = true
 
-[profile.dev]
-lto = true
-
 [features]
-default = ["parallel"]
-std = ["ark-ff/std", "ark-ec/std", "ark-poly/std", "ark-relations/std", "ark-std/std" ]
+default = ["parallel", "circom"]
+std = ["ark-ff/std", "ark-ec/std", "ark-poly/std", "ark-relations/std", "ark-std/std", "wasmer-sys" ]
 parallel = ["std", "ark-ff/parallel", "ark-poly/parallel", "ark-ec/parallel", "ark-std/parallel", "rayon"]
 print-trace = [ "ark-std/print-trace" ]
+circom = ["wasmer", "fnv", "num-bigint"]
+wasmer-js = ["wasmer/js-default"]
+wasmer-sys = ["wasmer/sys-default"]

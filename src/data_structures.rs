@@ -88,6 +88,8 @@ pub struct VerifyingKey<E: PairingEngine> {
     pub gamma_abc_g1: Vec<E::G1Affine>,
     /// The element `eta*gamma^-1 * G` in `E::G1`.
     pub eta_gamma_inv_g1: E::G1Affine,
+    /// No of witness to commit
+    pub commit_witness_count: usize,
 }
 
 /// A verification key in the Groth16 SNARK with CP_link verification parameters
@@ -124,6 +126,7 @@ impl<E: PairingEngine> Default for VerifyingKey<E> {
             delta_g2: E::G2Affine::default(),
             gamma_abc_g1: Vec::new(),
             eta_gamma_inv_g1: E::G1Affine::default(),
+            commit_witness_count: 0,
         }
     }
 }
@@ -219,8 +222,6 @@ pub struct ProvingKeyCommon<E: PairingEngine> {
     pub h_query: Vec<E::G1Affine>,
     /// The elements `l_i * G` in `E::G1`.
     pub l_query: Vec<E::G1Affine>,
-    /// No of witness to commit
-    pub commit_witness_count: usize,
 }
 
 /// The prover key for for the Groth16 zkSNARK.
@@ -247,4 +248,23 @@ pub struct LinkPublicGenerators<E: PairingEngine> {
     pub pedersen_gens: Vec<E::G1Affine>,
     pub g1: E::G1Affine,
     pub g2: E::G2Affine,
+}
+
+impl<E: PairingEngine> VerifyingKey<E> {
+    pub fn num_public_inputs(&self) -> usize {
+        self.gamma_abc_g1.len() - self.commit_witness_count
+    }
+
+    pub fn num_committed_witnesses(&self) -> usize {
+        self.commit_witness_count
+    }
+
+    pub fn get_commitment_key_for_witnesses(&self) -> Vec<E::G1Affine> {
+        let start = self.num_public_inputs();
+        let end = start + self.commit_witness_count;
+        let mut key = Vec::with_capacity(self.commit_witness_count + 1);
+        key.extend_from_slice(&self.gamma_abc_g1[start..end]);
+        key.push(self.eta_gamma_inv_g1);
+        key
+    }
 }
