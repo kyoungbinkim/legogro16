@@ -1,6 +1,6 @@
 use crate::link::{PESubspaceSnark, SubspaceSnark};
 use ark_ec::{AffineCurve, PairingEngine, ProjectiveCurve};
-use ark_ff::PrimeField;
+use ark_ff::{One, PrimeField};
 
 use super::{PreparedVerifyingKey, ProofWithLink, VerifyingKeyWithLink};
 
@@ -8,9 +8,14 @@ use ark_relations::r1cs::SynthesisError;
 
 use crate::error::Error;
 use crate::{Proof, VerifyingKey};
+use ark_ec::msm::VariableBaseMSM;
+use ark_std::cfg_iter;
 use ark_std::vec;
 use ark_std::vec::Vec;
 use core::ops::{AddAssign, Neg};
+
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
 
 /// Prepare the verifying key `vk` for use in proof verification.
 pub fn prepare_verifying_key<E: PairingEngine>(vk: &VerifyingKey<E>) -> PreparedVerifyingKey<E> {
@@ -32,12 +37,22 @@ pub fn prepare_inputs<E: PairingEngine>(
         return Err(SynthesisError::MalformedVerifyingKey).map_err(|e| e.into());
     }
 
-    let mut d = pvk.vk.gamma_abc_g1[0].into_projective();
-    for (i, b) in public_inputs.iter().zip(pvk.vk.gamma_abc_g1.iter().skip(1)) {
-        d.add_assign(&b.mul(i.into_repr()));
+    if public_inputs.len() > 2 {
+        let mut inp = Vec::with_capacity(1 + public_inputs.len());
+        inp.push(E::Fr::one());
+        inp.extend_from_slice(public_inputs);
+        let inp = cfg_iter!(inp).map(|a| a.into_repr()).collect::<Vec<_>>();
+        Ok(VariableBaseMSM::multi_scalar_mul(
+            &pvk.vk.gamma_abc_g1,
+            &inp,
+        ))
+    } else {
+        let mut d = pvk.vk.gamma_abc_g1[0].into_projective();
+        for (i, b) in public_inputs.iter().zip(pvk.vk.gamma_abc_g1.iter().skip(1)) {
+            d.add_assign(&b.mul(i.into_repr()));
+        }
+        Ok(d)
     }
-
-    Ok(d)
 }
 
 /// Verify the proof of the Subspace Snark on the equality of openings of cp_link and proof.d

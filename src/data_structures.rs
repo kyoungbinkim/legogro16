@@ -259,6 +259,7 @@ impl<E: PairingEngine> VerifyingKey<E> {
         self.commit_witness_count
     }
 
+    /// Get the commitment key used for the Pedersen commitment to witnesses in the proof
     pub fn get_commitment_key_for_witnesses(&self) -> Vec<E::G1Affine> {
         let start = self.num_public_inputs();
         let end = start + self.commit_witness_count;

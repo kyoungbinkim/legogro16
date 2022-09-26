@@ -4,6 +4,7 @@ use crate::{
     Proof, ProofWithLink, ProvingKey, ProvingKeyCommon, ProvingKeyWithLink, VerifyingKey,
     VerifyingKeyWithLink,
 };
+use ark_ec::msm::FixedBaseMSM;
 use ark_ec::{msm::VariableBaseMSM, AffineCurve, PairingEngine, ProjectiveCurve};
 use ark_ff::{PrimeField, UniformRand, Zero};
 use ark_poly::GeneralEvaluationDomain;
@@ -293,10 +294,14 @@ where
 
     end_timer!(c_acc_time);
 
-    let r_repr = r.into_repr();
     let s_repr = s.into_repr();
-    let rs_repr = (r * s).into_repr();
     let delta_g1_proj = pk_common.delta_g1.into_projective();
+
+    // There will be multiple multiplications with delta_g1_proj so creating a table
+    let window_size = 3;
+    let scalar_size = <<E as PairingEngine>::G1Affine as AffineCurve>::ScalarField::size_in_bits();
+    let outerc = (scalar_size + window_size - 1) / window_size;
+    let delta_g1_table = FixedBaseMSM::get_window_table(scalar_size, window_size, delta_g1_proj);
 
     let input_assignment_wth_one = cfg_iter!(input_assignment)
         .map(|s| s.into_repr())
@@ -308,14 +313,14 @@ where
 
     // Compute A
     let a_acc_time = start_timer!(|| "Compute A");
-    let r_g1 = delta_g1_proj.mul(r_repr);
+    let r_g1 = FixedBaseMSM::windowed_mul(outerc, window_size, &delta_g1_table, &r);
     let g_a = calculate_coeff(r_g1, &pk_common.a_query, vk.alpha_g1, &assignment);
     end_timer!(a_acc_time);
 
     // Compute B in G1 if needed
     let g1_b = if !r.is_zero() {
         let b_g1_acc_time = start_timer!(|| "Compute B in G1");
-        let s_g1 = delta_g1_proj.mul(s_repr);
+        let s_g1 = FixedBaseMSM::windowed_mul(outerc, window_size, &delta_g1_table, &s);
         let g1_b = calculate_coeff(s_g1, &pk_common.b_g1_query, pk_common.beta_g1, &assignment);
         end_timer!(b_g1_acc_time);
 
@@ -334,8 +339,8 @@ where
 
     let c_time = start_timer!(|| "Finish C");
     let mut g_c = g_a.mul(s_repr);
-    g_c += &g1_b.mul(r_repr);
-    g_c -= &delta_g1_proj.mul(rs_repr);
+    g_c += &g1_b.mul(r.into_repr());
+    g_c -= &FixedBaseMSM::windowed_mul(outerc, window_size, &delta_g1_table, &(r * s));
     g_c += &l_aux_acc;
     g_c += &h_acc;
     g_c -= &v_eta_delta_inv;

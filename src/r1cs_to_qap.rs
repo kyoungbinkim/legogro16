@@ -1,6 +1,6 @@
 use ark_ff::{One, PrimeField, Zero};
 use ark_poly::EvaluationDomain;
-use ark_std::{cfg_into_iter, cfg_iter, cfg_iter_mut, end_timer, start_timer, vec};
+use ark_std::{cfg_into_iter, cfg_iter, cfg_iter_mut, end_timer, marker::Sync, start_timer, vec};
 
 use crate::Vec;
 use ark_relations::r1cs::{
@@ -54,7 +54,7 @@ pub trait R1CStoQAP {
 
     #[inline]
     /// Computes a QAP witness corresponding to the R1CS witness defined by `cs`.
-    fn witness_map<F: PrimeField, D: EvaluationDomain<F>>(
+    fn witness_map<F: PrimeField, D: EvaluationDomain<F> + Sync>(
         prover: ConstraintSystemRef<F>,
     ) -> Result<Vec<F>, SynthesisError> {
         let matrices = prover.to_matrices().unwrap();
@@ -79,7 +79,7 @@ pub trait R1CStoQAP {
     }
 
     /// Computes a QAP witness corresponding to the R1CS witness defined by `cs`.
-    fn witness_map_from_matrices<F: PrimeField, D: EvaluationDomain<F>>(
+    fn witness_map_from_matrices<F: PrimeField, D: EvaluationDomain<F> + Sync>(
         matrices: &ConstraintMatrices<F>,
         num_inputs: usize,
         num_constraints: usize,
@@ -147,7 +147,7 @@ impl R1CStoQAP for LibsnarkReduction {
     }
 
     #[inline]
-    fn witness_map_from_matrices<F: PrimeField, D: EvaluationDomain<F>>(
+    fn witness_map_from_matrices<F: PrimeField, D: EvaluationDomain<F> + Sync>(
         matrices: &ConstraintMatrices<F>,
         num_inputs: usize,
         num_constraints: usize,
@@ -177,16 +177,6 @@ impl R1CStoQAP for LibsnarkReduction {
             a[start..end].clone_from_slice(&full_assignment[..num_inputs]);
         }
 
-        domain.ifft_in_place(&mut a);
-        domain.ifft_in_place(&mut b);
-
-        domain.coset_fft_in_place(&mut a);
-        domain.coset_fft_in_place(&mut b);
-
-        let mut ab = domain.mul_polynomials_in_evaluation_domain(&a, &b);
-        drop(a);
-        drop(b);
-
         let mut c = vec![zero; domain_size];
         cfg_iter_mut!(c[..num_constraints])
             .enumerate()
@@ -194,8 +184,13 @@ impl R1CStoQAP for LibsnarkReduction {
                 *c = evaluate_constraint(&matrices.c[i], &full_assignment);
             });
 
-        domain.ifft_in_place(&mut c);
-        domain.coset_fft_in_place(&mut c);
+        let mut arr = [&mut a, &mut b, &mut c];
+        cfg_iter_mut!(arr).for_each(|mut x| domain.ifft_in_place(&mut x));
+        cfg_iter_mut!(arr).for_each(|mut x| domain.coset_fft_in_place(&mut x));
+
+        let mut ab = domain.mul_polynomials_in_evaluation_domain(&a, &b);
+        drop(a);
+        drop(b);
 
         cfg_iter_mut!(ab)
             .zip(c)
@@ -213,8 +208,9 @@ impl R1CStoQAP for LibsnarkReduction {
         zt: F,
         delta_inverse: F,
     ) -> Result<Vec<F>, SynthesisError> {
+        let zt_times_delta_inverse = zt * delta_inverse;
         let scalars = cfg_into_iter!(0..max_power)
-            .map(|i| zt * &delta_inverse * &t.pow([i as u64]))
+            .map(|i| zt_times_delta_inverse * t.pow([i as u64]))
             .collect::<Vec<_>>();
         Ok(scalars)
     }
