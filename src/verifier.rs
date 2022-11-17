@@ -106,10 +106,23 @@ pub fn verify_proof<E: PairingEngine>(
     proof: &Proof<E>,
     public_inputs: &[E::Fr],
 ) -> crate::Result<()> {
-    let mut d = proof.d.into_projective();
-    d.add_assign(prepare_inputs(pvk, public_inputs)?);
+    verify_qap_proof(
+        pvk,
+        proof.a,
+        proof.b,
+        proof.c,
+        calculate_d(pvk, proof, public_inputs)?,
+    )
+}
 
-    verify_qap_proof(pvk, proof.a, proof.b, proof.c, d.into_affine())
+pub fn calculate_d<E: PairingEngine>(
+    pvk: &PreparedVerifyingKey<E>,
+    proof: &Proof<E>,
+    public_inputs: &[E::Fr],
+) -> crate::Result<E::G1Affine> {
+    let mut d = prepare_inputs(pvk, public_inputs)?;
+    d.add_assign_mixed(&proof.d);
+    Ok(d.into_affine())
 }
 
 /// Verify a LegoGroth16 proof `proof` against the prepared verification key `pvk`

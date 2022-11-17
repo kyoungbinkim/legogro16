@@ -6,7 +6,7 @@ use crate::{
 };
 use ark_ec::msm::FixedBaseMSM;
 use ark_ec::{msm::VariableBaseMSM, AffineCurve, PairingEngine, ProjectiveCurve};
-use ark_ff::{PrimeField, UniformRand, Zero};
+use ark_ff::{Field, PrimeField, UniformRand, Zero};
 use ark_poly::GeneralEvaluationDomain;
 use ark_relations::r1cs::{
     ConstraintSynthesizer, ConstraintSystem, ConstraintSystemRef, OptimizationGoal, SynthesisError,
@@ -298,7 +298,7 @@ where
     let delta_g1_proj = pk_common.delta_g1.into_projective();
 
     // There will be multiple multiplications with delta_g1_proj so creating a table
-    let window_size = 3;
+    let window_size = 3; // 3 because number of multiplications is < 32, see `FixedBaseMSM::get_mul_window_size`
     let scalar_size = <<E as PairingEngine>::G1Affine as AffineCurve>::ScalarField::size_in_bits();
     let outerc = (scalar_size + window_size - 1) / window_size;
     let delta_g1_table = FixedBaseMSM::get_window_table(scalar_size, window_size, delta_g1_proj);
@@ -456,6 +456,88 @@ pub fn verify_witness_commitment<E: PairingEngine>(
     }
 
     Ok(())
+}
+
+/// Given a LegoGroth16 proof, returns a fresh proof of the same statement. This is not described in the
+/// Legosnark paper but inspired from `rerandomize_proof` in `ark_groth16`. Secondly this does not keep
+/// `proof.D` as a commitment to the witnesses so not that useful. I don't know if this is theoretically
+/// correct. Following comments are quoted from that
+///
+/// For a proof π of a
+/// statement S, the output of the non-deterministic procedure `rerandomize_proof(π)` is
+/// statistically indistinguishable from a fresh honest proof of S. For more info, see theorem 3 of
+/// [\[BKSV20\]](https://eprint.iacr.org/2020/811)
+pub fn rerandomize_proof<E, R>(proof: &Proof<E>, vk: &VerifyingKey<E>, rng: &mut R) -> Proof<E>
+where
+    E: PairingEngine,
+    R: Rng,
+{
+    // These are our rerandomization factors. They must be nonzero and uniformly sampled.
+    let (mut r1, mut r2) = (E::Fr::zero(), E::Fr::zero());
+    while r1.is_zero() || r2.is_zero() {
+        r1 = E::Fr::rand(rng);
+        r2 = E::Fr::rand(rng);
+    }
+
+    //   A' = (1/r₁)A
+    //   B' = r₁B + r₁r₂(δG₂) + r₁r₂(γG₂)
+    //   C' = C + r₂A
+    //   D' = D + r₂A
+
+    // We can unwrap() this because r₁ is guaranteed to be nonzero
+    let new_a = proof.a.mul(r1.inverse().unwrap());
+    let new_b = proof.b.mul(r1) + (vk.delta_g2 + vk.gamma_g2).mul(r1 * &r2);
+    let a_r2 = proof.a.mul(r2).into_affine();
+    let new_c = proof.c + a_r2;
+    let new_d = proof.d + a_r2;
+
+    Proof {
+        a: new_a.into_affine(),
+        b: new_b.into_affine(),
+        c: new_c,
+        d: new_d,
+    }
+}
+
+/// A similar technique to re-randomize proof as in `rerandomize_proof` but it still keeps `proof.D` a
+/// commitment to witnesses. See comments of `rerandomize_proof` for more.
+pub fn rerandomize_proof_1<E, R>(
+    proof: &Proof<E>,
+    old_v: E::Fr,
+    new_v: E::Fr,
+    vk: &VerifyingKey<E>,
+    eta_delta_inv_g1: &E::G1Affine,
+    rng: &mut R,
+) -> Proof<E>
+where
+    E: PairingEngine,
+    R: Rng,
+{
+    // These are our rerandomization factors. They must be nonzero and uniformly sampled.
+    let (mut r1, mut r2) = (E::Fr::zero(), E::Fr::zero());
+    while r1.is_zero() || r2.is_zero() {
+        r1 = E::Fr::rand(rng);
+        r2 = E::Fr::rand(rng);
+    }
+
+    //   A' = (1/r₁)A
+    //   B' = r₁B + r₁r₂(δG₂)
+    //   C' = C + r₂A + (old_v - new_v)((η/δ)G₁)
+    //   D' = D + (new_v - old_v)((η/γ)G₁)
+
+    // We can unwrap() this because r₁ is guaranteed to be nonzero
+    let new_a = proof.a.mul(r1.inverse().unwrap());
+    let new_b = proof.b.mul(r1) + vk.delta_g2.mul(r1 * &r2);
+    let a_r2 = proof.a.mul(r2).into_affine();
+    let new_c = (proof.c + a_r2) + eta_delta_inv_g1.mul(old_v - new_v).into_affine();
+    let new_d = proof.d + vk.eta_gamma_inv_g1.mul(new_v - old_v).into_affine();
+
+    Proof {
+        a: new_a.into_affine(),
+        b: new_b.into_affine(),
+        c: new_c,
+        d: new_d,
+    }
 }
 
 /// Given a circuit, generate its constraints and the corresponding QAP witness.

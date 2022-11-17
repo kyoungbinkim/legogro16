@@ -37,6 +37,9 @@ pub mod error;
 #[cfg(feature = "circom")]
 pub mod circom;
 
+#[cfg(feature = "aggregation")]
+pub mod aggregation;
+
 /// Constraints for the Groth16 verifier.
 // Cannot yet create a LegoGroth16 gadget (for recursive proof) so commenting it out.
 // #[cfg(feature = "r1cs")]

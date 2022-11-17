@@ -40,6 +40,21 @@ This library comes with unit tests for each of the provided crates. Run the test
 cargo test
 ```
 
+To build without `std` but with Circom support and proof aggregation, run 
+```
+cargo build --no-default-features --features=circom,aggregation,wasmer-sys
+```
+
+To build for WASM with Circom support and proof aggregation, run
+```
+cargo build --no-default-features --features=circom,aggregation,wasmer-js --target wasm32-unknown-unknown
+```
+
+To run all tests without `std`, run
+```
+cargo test --no-default-features --features=std,circom,aggregation,wasmer-sys
+```
+
 ## License
 
 This library is licensed under either of the following licenses, at your discretion.

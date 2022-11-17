@@ -29,7 +29,8 @@ use ark_relations::{
 use ark_std::rand::{rngs::StdRng, SeedableRng};
 use legogroth16::prover::verify_commitments;
 use legogroth16::{
-    create_random_proof, generate_random_parameters, verify_proof, verify_witness_commitment,
+    create_random_proof, generate_random_parameters, rerandomize_proof, rerandomize_proof_1,
+    verify_proof, verify_witness_commitment,
 };
 
 const MIMC_ROUNDS: usize = 322;
@@ -208,6 +209,8 @@ fn mimc_legogroth16<E: PairingEngine>() {
     let mut total_proving_inc_link = Duration::new(0, 0);
     let mut total_verifying_inc_link = Duration::new(0, 0);
     let mut total_proving = Duration::new(0, 0);
+    let mut total_rerandomizing = Duration::new(0, 0);
+    let mut total_rerandomizing_1 = Duration::new(0, 0);
     let mut total_verifying = Duration::new(0, 0);
 
     for _ in 0..SAMPLES {
@@ -257,35 +260,53 @@ fn mimc_legogroth16<E: PairingEngine>() {
             verify_proof(&pvk, &proof, &[image]).unwrap();
             total_verifying += start.elapsed();
 
-            // proof.write(&mut proof_vec).unwrap();
+            let start = Instant::now();
+            let re_rand_proof = rerandomize_proof(&proof, &params.vk, &mut rng);
+            total_rerandomizing += start.elapsed();
+
+            verify_proof(&pvk, &re_rand_proof, &[image]).unwrap();
+
+            let start = Instant::now();
+            let new_v = E::Fr::rand(&mut rng);
+            let re_rand_proof_1 = rerandomize_proof_1(
+                &proof,
+                v,
+                new_v,
+                &params.vk,
+                &params.common.eta_delta_inv_g1,
+                &mut rng,
+            );
+            total_rerandomizing_1 += start.elapsed();
+
+            verify_proof(&pvk, &re_rand_proof_1, &[image]).unwrap();
+            // Prover verifies the openings of the commitments in new proof.d
+            verify_witness_commitment(&params.vk, &re_rand_proof_1, 1, &[xl, xr], &new_v).unwrap();
         }
     }
-    let proving_avg_inc_link = total_proving_inc_link / SAMPLES;
-    let proving_avg_inc_link = proving_avg_inc_link.subsec_nanos() as f64 / 1_000_000_000f64
-        + (proving_avg_inc_link.as_secs() as f64);
 
-    let verifying_avg_inc_link = total_verifying_inc_link / SAMPLES;
-    let verifying_avg_inc_link = verifying_avg_inc_link.subsec_nanos() as f64 / 1_000_000_000f64
-        + (verifying_avg_inc_link.as_secs() as f64);
-
-    let proving_avg = total_proving / SAMPLES;
-    let proving_avg =
-        proving_avg.subsec_nanos() as f64 / 1_000_000_000f64 + (proving_avg.as_secs() as f64);
-
-    let verifying_avg = total_verifying / SAMPLES;
-    let verifying_avg =
-        verifying_avg.subsec_nanos() as f64 / 1_000_000_000f64 + (verifying_avg.as_secs() as f64);
+    fn avg(total: Duration) -> f64 {
+        let avg = total / SAMPLES;
+        avg.subsec_nanos() as f64 / 1_000_000_000f64 + (avg.as_secs() as f64)
+    }
 
     println!(
         "Average proving time including link proof: {:?} seconds",
-        proving_avg_inc_link
+        avg(total_proving_inc_link)
     );
     println!(
         "Average verifying time including link proof: {:?} seconds",
-        verifying_avg_inc_link
+        avg(total_verifying_inc_link)
     );
-    println!("Average proving time: {:?} seconds", proving_avg);
-    println!("Average verifying time: {:?} seconds", verifying_avg);
+    println!("Average proving time: {:?} seconds", avg(total_proving));
+    println!("Average verifying time: {:?} seconds", avg(total_verifying));
+    println!(
+        "Average re-randomizing proof time: {:?} seconds",
+        avg(total_rerandomizing)
+    );
+    println!(
+        "Average re-randomizing_1 proof time: {:?} seconds",
+        avg(total_rerandomizing_1)
+    );
 }
 
 mod bls12_377 {

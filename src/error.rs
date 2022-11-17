@@ -1,5 +1,8 @@
+#[cfg(feature = "aggregation")]
+use crate::aggregation::error::AggregationError;
 #[cfg(feature = "circom")]
 use crate::circom::error::CircomError;
+
 use crate::link::error::LinkError;
 use ark_relations::r1cs::SynthesisError;
 
@@ -14,6 +17,8 @@ pub enum Error {
     InsufficientWitnessesForCommitment(usize, usize),
     #[cfg(feature = "circom")]
     CircomError(CircomError),
+    #[cfg(feature = "aggregation")]
+    AggregationError(AggregationError),
 }
 
 impl From<SynthesisError> for Error {
@@ -32,5 +37,12 @@ impl From<LinkError> for Error {
 impl From<CircomError> for Error {
     fn from(e: CircomError) -> Self {
         Self::CircomError(e)
+    }
+}
+
+#[cfg(feature = "aggregation")]
+impl From<AggregationError> for Error {
+    fn from(e: AggregationError) -> Self {
+        Self::AggregationError(e)
     }
 }

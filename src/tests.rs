@@ -1,7 +1,8 @@
 use crate::{
     create_random_proof, create_random_proof_incl_cp_link, generate_random_parameters,
-    generate_random_parameters_incl_cp_link, prepare_verifying_key, verify_proof,
-    verify_proof_incl_cp_link, verify_witness_commitment, LinkPublicGenerators,
+    generate_random_parameters_incl_cp_link, prepare_verifying_key, rerandomize_proof,
+    rerandomize_proof_1, verify_proof, verify_proof_incl_cp_link, verify_witness_commitment,
+    LinkPublicGenerators,
 };
 use ark_ec::{PairingEngine, ProjectiveCurve};
 use ark_ff::Field;
@@ -230,6 +231,12 @@ where
                         .is_err()
                 );
             }
+            if commit_witness_count == 2 {
+                verify_witness_commitment(&params.vk, &proof, 1, &[a, b], &v).unwrap();
+                assert!(verify_witness_commitment(&params.vk, &proof, 1, &[b, a], &v).is_err());
+                assert!(verify_witness_commitment(&params.vk, &proof, 1, &[a], &v).is_err());
+                assert!(verify_witness_commitment(&params.vk, &proof, 2, &[], &v).is_err());
+            }
             if commit_witness_count == 1 {
                 verify_witness_commitment(&params.vk, &proof, 1, &[a], &v).unwrap();
                 assert!(verify_witness_commitment(&params.vk, &proof, 1, &[a, b], &v).is_err());
@@ -251,6 +258,91 @@ where
             // Verify LegoGroth16 proof
             verify_proof(&pvk, &proof, &[c]).unwrap();
             assert!(verify_proof(&pvk, &proof, &[]).is_err());
+
+            let re_rand_proof = rerandomize_proof(&proof, &params.vk, &mut rng);
+            verify_proof(&pvk, &re_rand_proof, &[c]).unwrap();
+
+            // rerandomize_proof does not keep D as a commitment to witnesses
+            if commit_witness_count == 2 {
+                assert!(
+                    verify_witness_commitment(&params.vk, &re_rand_proof, 1, &[a, b], &v).is_err()
+                );
+            }
+            if commit_witness_count == 1 {
+                assert!(
+                    verify_witness_commitment(&params.vk, &re_rand_proof, 1, &[a], &v).is_err()
+                );
+            }
+            if commit_witness_count == 0 {
+                assert!(verify_witness_commitment(&params.vk, &re_rand_proof, 1, &[], &v).is_err());
+            }
+
+            let new_v = E::Fr::rand(&mut rng);
+            let re_rand_proof_1 = rerandomize_proof_1(
+                &proof,
+                v,
+                new_v,
+                &params.vk,
+                &params.common.eta_delta_inv_g1,
+                &mut rng,
+            );
+            verify_proof(&pvk, &re_rand_proof_1, &[c]).unwrap();
+
+            // rerandomize_proof_1 does keep D as a commitment to witnesses
+            if commit_witness_count == 2 {
+                verify_witness_commitment(&params.vk, &re_rand_proof_1, 1, &[a, b], &new_v)
+                    .unwrap();
+                assert!(verify_witness_commitment(
+                    &params.vk,
+                    &re_rand_proof_1,
+                    1,
+                    &[b, a],
+                    &new_v
+                )
+                .is_err());
+                assert!(
+                    verify_witness_commitment(&params.vk, &re_rand_proof_1, 1, &[a], &new_v)
+                        .is_err()
+                );
+                assert!(
+                    verify_witness_commitment(&params.vk, &re_rand_proof_1, 2, &[], &new_v)
+                        .is_err()
+                );
+            }
+            if commit_witness_count == 1 {
+                verify_witness_commitment(&params.vk, &re_rand_proof_1, 1, &[a], &new_v).unwrap();
+                assert!(verify_witness_commitment(
+                    &params.vk,
+                    &re_rand_proof_1,
+                    1,
+                    &[a, b],
+                    &new_v
+                )
+                .is_err());
+                assert!(
+                    verify_witness_commitment(&params.vk, &re_rand_proof_1, 2, &[a], &new_v)
+                        .is_err()
+                );
+            }
+            if commit_witness_count == 0 {
+                verify_witness_commitment(&params.vk, &re_rand_proof_1, 1, &[], &new_v).unwrap();
+                assert!(verify_witness_commitment(
+                    &params.vk,
+                    &re_rand_proof_1,
+                    1,
+                    &[a, b],
+                    &new_v
+                )
+                .is_err());
+                assert!(
+                    verify_witness_commitment(&params.vk, &re_rand_proof_1, 1, &[a], &new_v)
+                        .is_err()
+                );
+                assert!(
+                    verify_witness_commitment(&params.vk, &re_rand_proof_1, 2, &[], &new_v)
+                        .is_err()
+                );
+            }
         }
     }
 
@@ -350,6 +442,21 @@ where
         // Verify LegoGroth16 proof
         verify_proof(&pvk, &proof, &[y]).unwrap();
         assert!(verify_proof(&pvk, &proof, &[]).is_err());
+
+        let re_rand_proof = rerandomize_proof(&proof, &params.vk, &mut rng);
+        verify_proof(&pvk, &re_rand_proof, &[y]).unwrap();
+
+        let new_v = E::Fr::rand(&mut rng);
+        let re_rand_proof_1 = rerandomize_proof_1(
+            &proof,
+            v,
+            new_v,
+            &params.vk,
+            &params.common.eta_delta_inv_g1,
+            &mut rng,
+        );
+        verify_proof(&pvk, &re_rand_proof_1, &[y]).unwrap();
+        verify_witness_commitment(&params.vk, &re_rand_proof_1, 1, &[a, b, c, d], &new_v).unwrap();
     }
 }
 
@@ -441,6 +548,21 @@ where
         verify_proof(&pvk, &proof, &[e, f]).unwrap();
         assert!(verify_proof(&pvk, &proof, &[e]).is_err());
         assert!(verify_proof(&pvk, &proof, &[]).is_err());
+
+        let re_rand_proof = rerandomize_proof(&proof, &params.vk, &mut rng);
+        verify_proof(&pvk, &re_rand_proof, &[e, f]).unwrap();
+
+        let new_v = E::Fr::rand(&mut rng);
+        let re_rand_proof_1 = rerandomize_proof_1(
+            &proof,
+            v,
+            new_v,
+            &params.vk,
+            &params.common.eta_delta_inv_g1,
+            &mut rng,
+        );
+        verify_proof(&pvk, &re_rand_proof_1, &[e, f]).unwrap();
+        verify_witness_commitment(&params.vk, &re_rand_proof_1, 2, &[a, b, c, d], &new_v).unwrap();
     }
 }
 

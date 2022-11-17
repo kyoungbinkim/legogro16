@@ -3,7 +3,7 @@ on:
   pull_request:
   push:
     branches:
-      - master
+      - comm-wit
 env:
   RUST_BACKTRACE: 1
 

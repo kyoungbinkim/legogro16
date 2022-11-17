@@ -27,6 +27,8 @@ wasmer = { version = "2.3.0", optional = true, default-features = false }
 fnv = { version = "1.0.3", default-features = false, optional = true }
 num-bigint = { version = "0.4", default-features = false, optional = true }
 log = "0.4"
+merlin = { version = "^3.0", default-features = false, optional = true }
+ark-groth16 = { version = "^0.3.0", default-features = false, optional = true }
 
 [dev-dependencies]
 csv = { version = "1" }
@@ -43,14 +45,16 @@ tracing-subscriber = { version = "0.2" }
 hex-literal = "0.2.1"
 serde_json = "1.0.64"
 
+
 [profile.release]
 lto = true
 
 [features]
-default = ["parallel", "circom"]
-std = ["ark-ff/std", "ark-ec/std", "ark-poly/std", "ark-relations/std", "ark-std/std", "wasmer-sys" ]
-parallel = ["std", "ark-ff/parallel", "ark-poly/parallel", "ark-ec/parallel", "ark-std/parallel", "rayon"]
+default = ["parallel", "circom", "aggregation"]
+std = ["ark-ff/std", "ark-ec/std", "ark-poly/std", "ark-relations/std", "ark-std/std", "wasmer-sys", "merlin/std", "ark-groth16/std" ]
+parallel = ["std", "ark-ff/parallel", "ark-poly/parallel", "ark-ec/parallel", "ark-std/parallel", "rayon", "ark-groth16/parallel"]
 print-trace = [ "ark-std/print-trace" ]
 circom = ["wasmer", "fnv", "num-bigint"]
+aggregation = ["merlin", "ark-groth16"]
 wasmer-js = ["wasmer/js-default"]
 wasmer-sys = ["wasmer/sys-default"]
