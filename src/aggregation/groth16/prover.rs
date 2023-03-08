@@ -1,7 +1,8 @@
-use ark_ec::{AffineCurve, PairingEngine, ProjectiveCurve};
+use ark_ec::pairing::PairingOutput;
+use ark_ec::{pairing::Pairing, AffineRepr, CurveGroup, VariableBaseMSM};
 use ark_ff::{batch_inversion, Field, PrimeField};
 use ark_std::ops::{AddAssign, MulAssign};
-use ark_std::{cfg_iter, cfg_iter_mut, string::ToString, vec::Vec, Zero};
+use ark_std::{cfg_iter, cfg_iter_mut, string::ToString, vec::Vec, Zero, format};
 
 use ark_groth16::Proof;
 
@@ -13,12 +14,12 @@ use crate::aggregation::error::AggregationError;
 use crate::aggregation::key::{PreparedVKey, VKey, WKey};
 
 use super::proof::{AggregateProof, GipaProof, TippMippProof};
-use crate::aggregation::srs::ProverSRS;
-use crate::aggregation::transcript::Transcript;
+use crate::aggregation::srs::{PreparedProverSRS, ProverSRS};
 use crate::aggregation::utils::{
     compress, inner_product_and_double_commitments, inner_product_and_single_commitments,
-    multiexponentiation_with_bigint, pairing_product, powers, prove_commitments,
+    prove_commitments,
 };
+use dock_crypto_utils::{ff::powers, transcript::Transcript};
 
 /// Aggregate `n` zkSnark proofs, where `n` must be a power of two.
 /// WARNING: transcript_include represents everything that should be included in
@@ -31,8 +32,8 @@ use crate::aggregation::utils::{
 /// number of proofs and public inputs (+100ms in our case). In the case of Filecoin, the only
 /// non-fixed part of the public inputs are the challenges derived from a seed. Even though this
 /// seed comes from a random beacon, we are hashing this as a safety precaution.
-pub fn aggregate_proofs<E: PairingEngine, T: Transcript>(
-    srs: &ProverSRS<E>,
+pub fn aggregate_proofs<E: Pairing, T: Transcript>(
+    srs: impl Into<PreparedProverSRS<E>>,
     transcript: &mut T,
     proofs: &[Proof<E>],
 ) -> Result<AggregateProof<E>, AggregationError> {
@@ -47,9 +48,10 @@ pub fn aggregate_proofs<E: PairingEngine, T: Transcript>(
         ));
     }
 
+    let srs = srs.into();
     if !srs.has_correct_len(proofs.len()) {
         return Err(AggregationError::InvalidSRS(
-            "SRS len != proofs len".to_string(),
+            format!("SRS len {} != proofs len {}", srs.len(), proofs.len()).to_string(),
         ));
     }
     // We first commit to A B and C - these commitments are what the verifier
@@ -58,43 +60,43 @@ pub fn aggregate_proofs<E: PairingEngine, T: Transcript>(
     let b = proofs.iter().map(|proof| proof.b).collect::<Vec<_>>();
     let c = proofs.iter().map(|proof| proof.c).collect::<Vec<_>>();
 
-    let vkey_prep = PreparedVKey::from(&srs.vkey);
+    let (vkey_prep, srs) = srs.extract_prepared();
     let b_prep = cfg_iter!(b)
         .map(|e| E::G2Prepared::from(*e))
         .collect::<Vec<_>>();
 
     // A and B are committed together in this scheme
     // T_AB, U_AB
-    let com_ab = PairCommitment::<E>::double_with_prepared_key_and_message(
-        &vkey_prep, &srs.wkey, &a, b_prep,
-    )?;
+    let com_ab = PairCommitment::<E>::double(vkey_prep.clone(), &srs.wkey, &a, b_prep)?;
     // T_C, U_C
-    let com_c = PairCommitment::<E>::single_with_prepared_key(&vkey_prep, &c)?;
+    let com_c = PairCommitment::<E>::single(vkey_prep, &c)?;
 
     // Derive a random scalar to perform a linear combination of proofs
     transcript.append(b"AB-commitment", &com_ab);
     transcript.append(b"C-commitment", &com_c);
-    let r = transcript.challenge_scalar::<E::Fr>(b"r-random-fiatshamir");
+    let r = transcript.challenge_scalar::<E::ScalarField>(b"r-random-fiatshamir");
 
     // 1,r, r^2, r^3, r^4 ...
-    let r_vec: Vec<E::Fr> = powers(proofs.len(), &r);
+    let r_vec: Vec<E::ScalarField> = powers(&r, proofs.len());
     // 1,r^-1, r^-2, r^-3
     let mut r_inv = r_vec.clone();
     batch_inversion(&mut r_inv);
 
-    let r_repr = cfg_iter!(r_vec).map(|r| r.into_repr()).collect::<Vec<_>>();
+    let r_repr = cfg_iter!(r_vec)
+        .map(|r| r.into_bigint())
+        .collect::<Vec<_>>();
 
     // B^{r}
     let b_r_proj = cfg_iter!(b)
         .zip(cfg_iter!(r_repr))
-        .map(|(bi, ri)| bi.mul(*ri))
+        .map(|(bi, ri)| bi.mul_bigint(*ri))
         .collect::<Vec<_>>();
-    let b_r = E::G2Projective::batch_normalization_into_affine(&b_r_proj);
+    let b_r = E::G2::normalize_batch(&b_r_proj);
 
     // compute A * B^r for the verifier
-    let z_ab = pairing_product::<E>(&a, &b_r);
+    let z_ab = E::multi_pairing(&a, &b_r);
     // compute C^r for the verifier
-    let z_c = multiexponentiation_with_bigint::<E::G1Affine>(&c, &r_repr).into_affine();
+    let z_c = E::G1::msm_bigint(&c, &r_repr).into_affine();
 
     // w^{r^{-1}}
     let wkey_r_inv = srs.wkey.scale(&r_inv)?;
@@ -127,15 +129,15 @@ pub fn aggregate_proofs<E: PairingEngine, T: Transcript>(
 /// commitment key v is used to commit to A and C recursively in GIPA such that
 /// only one KZG proof is needed for v. In the original paper version, since the
 /// challenges of GIPA would be different, two KZG proofs would be needed.
-fn prove_tipp_mipp<E: PairingEngine, T: Transcript>(
+fn prove_tipp_mipp<E: Pairing, T: Transcript>(
     srs: &ProverSRS<E>,
     transcript: &mut T,
     a: &[E::G1Affine],
     b: &[E::G2Affine],
     c: &[E::G1Affine],
     wkey: &WKey<E>, // scaled key w^r^-1
-    r_vec: &[E::Fr],
-    z_ab: &E::Fqk,
+    r_vec: &[E::ScalarField],
+    z_ab: &PairingOutput<E>,
     z_c: &E::G1Affine,
 ) -> Result<TippMippProof<E>, AggregationError> {
     let r_shift = r_vec[1].clone();
@@ -157,7 +159,7 @@ fn prove_tipp_mipp<E: PairingEngine, T: Transcript>(
     transcript.append(b"vkey1", &proof.final_vkey.1);
     transcript.append(b"wkey0", &proof.final_wkey.0);
     transcript.append(b"wkey1", &proof.final_wkey.1);
-    let z = transcript.challenge_scalar::<E::Fr>(b"z-challenge");
+    let z = transcript.challenge_scalar::<E::ScalarField>(b"z-challenge");
 
     // Complete KZG proofs
     let (vkey_opening, wkey_opening) = prove_commitments::<E>(
@@ -182,17 +184,17 @@ fn prove_tipp_mipp<E: PairingEngine, T: Transcript>(
 /// It returns a proof containing all intermediate committed values, as well as
 /// the challenges generated necessary to do the polynomial commitment proof
 /// later in TIPP.
-fn gipa_tipp_mipp<E: PairingEngine>(
+fn gipa_tipp_mipp<E: Pairing>(
     transcript: &mut impl Transcript,
     a: &[E::G1Affine],
     b: &[E::G2Affine],
     c: &[E::G1Affine],
     vkey: &VKey<E>,
     wkey: &WKey<E>, // scaled key w^r^-1
-    r: &[E::Fr],
-    ip_ab: &E::Fqk,
+    r: &[E::ScalarField],
+    ip_ab: &PairingOutput<E>,
     agg_c: &E::G1Affine,
-) -> Result<(GipaProof<E>, Vec<E::Fr>, Vec<E::Fr>), AggregationError> {
+) -> Result<(GipaProof<E>, Vec<E::ScalarField>, Vec<E::ScalarField>), AggregationError> {
     // the values of vectors A and B rescaled at each step of the loop
     let (mut m_a, mut m_b) = (a.to_vec(), b.to_vec());
 
@@ -209,12 +211,13 @@ fn gipa_tipp_mipp<E: PairingEngine>(
     let mut comms_c = Vec::new();
     let mut z_ab = Vec::new();
     let mut z_c = Vec::new();
-    let mut challenges: Vec<E::Fr> = Vec::new();
-    let mut challenges_inv: Vec<E::Fr> = Vec::new();
+    let mut challenges: Vec<E::ScalarField> = Vec::new();
+    let mut challenges_inv: Vec<E::ScalarField> = Vec::new();
 
     transcript.append(b"inner-product-ab", ip_ab);
     transcript.append(b"comm-c", agg_c);
-    let mut c_inv: E::Fr = transcript.challenge_scalar::<E::Fr>(b"first-challenge");
+    let mut c_inv: E::ScalarField =
+        transcript.challenge_scalar::<E::ScalarField>(b"first-challenge");
     let mut c = c_inv.inverse().unwrap();
 
     let mut i = 0;
@@ -248,9 +251,11 @@ fn gipa_tipp_mipp<E: PairingEngine>(
             .map(|e| E::G2Prepared::from(*e))
             .collect::<Vec<_>>();
 
-        let r_left_bi = cfg_iter!(r_left).map(|s| s.into_repr()).collect::<Vec<_>>();
+        let r_left_bi = cfg_iter!(r_left)
+            .map(|s| s.into_bigint())
+            .collect::<Vec<_>>();
         let r_right_bi = cfg_iter!(r_right)
-            .map(|s| s.into_repr())
+            .map(|s| s.into_bigint())
             .collect::<Vec<_>>();
 
         // See section 3.3 for paper version with equivalent names
@@ -263,8 +268,8 @@ fn gipa_tipp_mipp<E: PairingEngine>(
             b_right_prep,
             &wk_left,
             &wk_right,
-            &vk_left_prep,
-            &vk_right_prep,
+            vk_left_prep.clone(),
+            vk_right_prep.clone(),
         );
 
         // MIPP part for C
@@ -273,8 +278,8 @@ fn gipa_tipp_mipp<E: PairingEngine>(
             &c_right,
             &r_left_bi,
             &r_right_bi,
-            &vk_left_prep,
-            &vk_right_prep,
+            vk_left_prep.clone(),
+            vk_right_prep.clone(),
         );
 
         // Fiat-Shamir challenge
@@ -291,7 +296,7 @@ fn gipa_tipp_mipp<E: PairingEngine>(
             transcript.append(b"tab_r", &tab_r);
             transcript.append(b"tuc_l", &tuc_l);
             transcript.append(b"tuc_r", &tuc_r);
-            c_inv = transcript.challenge_scalar::<E::Fr>(b"challenge_i");
+            c_inv = transcript.challenge_scalar::<E::ScalarField>(b"challenge_i");
 
             // Optimization for multiexponentiation to rescale G2 elements with
             // 128-bit challenge Swap 'c' and 'c_inv' since can't control bit size
@@ -316,7 +321,7 @@ fn gipa_tipp_mipp<E: PairingEngine>(
                 r_l.add_assign(r_r.clone());
             });
         let len = r_left.len();
-        m_r.resize(len, E::Fr::zero()); // shrink to new size
+        m_r.resize(len, E::ScalarField::zero()); // shrink to new size
 
         // v_left + v_right^x^-1
         vkey = vk_left.compress(&vk_right, &c_inv)?;

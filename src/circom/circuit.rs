@@ -2,7 +2,7 @@ use crate::circom::error::CircomError;
 use crate::circom::r1cs::{LC, R1CS};
 use crate::error::Error;
 use crate::{generate_random_parameters, ProvingKey};
-use ark_ec::PairingEngine;
+use ark_ec::pairing::Pairing;
 use ark_relations::r1cs::{
     ConstraintSynthesizer, ConstraintSystemRef, LinearCombination, SynthesisError, Variable,
 };
@@ -13,14 +13,14 @@ use ark_std::vec::Vec;
 use crate::circom::WitnessCalculator;
 
 #[derive(Clone, Debug)]
-pub struct CircomCircuit<E: PairingEngine> {
+pub struct CircomCircuit<E: Pairing> {
     pub r1cs: R1CS<E>,
     /// All wires of the circuit, including the public and private input wires as well as the intermediate wires.
     /// The 1st is always "1", followed by public input wires followed by the private (witness) wires.
-    pub wires: Option<Vec<E::Fr>>,
+    pub wires: Option<Vec<E::ScalarField>>,
 }
 
-impl<E: PairingEngine> CircomCircuit<E> {
+impl<E: Pairing> CircomCircuit<E> {
     pub fn setup(r1cs: R1CS<E>) -> Self {
         Self { r1cs, wires: None }
     }
@@ -47,10 +47,10 @@ impl<E: PairingEngine> CircomCircuit<E> {
     }
 }
 
-impl<'a, E: PairingEngine> CircomCircuit<E> {
+impl<'a, E: Pairing> CircomCircuit<E> {
     /// Get the public output and input signals of the circuit excluding the first signal "1".
     /// The returned vector contains the public output signals, followed by the public input signals
-    pub fn get_public_inputs(&self) -> Option<Vec<E::Fr>> {
+    pub fn get_public_inputs(&self) -> Option<Vec<E::ScalarField>> {
         match &self.wires {
             None => None,
             Some(w) => Some(w[1..self.r1cs.num_public].to_vec()),
@@ -58,11 +58,13 @@ impl<'a, E: PairingEngine> CircomCircuit<E> {
     }
 
     /// Set values for the circuit wires.
-    pub fn set_wires(&mut self, wires: Vec<E::Fr>) {
+    pub fn set_wires(&mut self, wires: Vec<E::ScalarField>) {
         self.wires = Some(wires);
     }
 
-    pub fn set_wires_using_witness_calculator<I: IntoIterator<Item = (String, Vec<E::Fr>)>>(
+    pub fn set_wires_using_witness_calculator<
+        I: IntoIterator<Item = (String, Vec<E::ScalarField>)>,
+    >(
         &mut self,
         wit_calc: &mut WitnessCalculator<E>,
         inputs: I,
@@ -74,11 +76,14 @@ impl<'a, E: PairingEngine> CircomCircuit<E> {
     }
 }
 
-impl<E: PairingEngine> ConstraintSynthesizer<E::Fr> for CircomCircuit<E> {
-    fn generate_constraints(self, cs: ConstraintSystemRef<E::Fr>) -> Result<(), SynthesisError> {
+impl<E: Pairing> ConstraintSynthesizer<E::ScalarField> for CircomCircuit<E> {
+    fn generate_constraints(
+        self,
+        cs: ConstraintSystemRef<E::ScalarField>,
+    ) -> Result<(), SynthesisError> {
         let wires = &self.wires;
 
-        let dummy = E::Fr::from(0u32);
+        let dummy = E::ScalarField::from(0u32);
 
         // Start from 1 because Arkworks implicitly allocates One for the first input
         for i in 1..self.r1cs.num_public {
@@ -108,8 +113,10 @@ impl<E: PairingEngine> ConstraintSynthesizer<E::Fr> for CircomCircuit<E> {
         };
         let make_lc = |lc_data: &LC<E>| {
             lc_data.terms().iter().fold(
-                LinearCombination::<E::Fr>::zero(),
-                |lc: LinearCombination<E::Fr>, (index, coeff)| lc + (*coeff, make_index(*index)),
+                LinearCombination::<E::ScalarField>::zero(),
+                |lc: LinearCombination<E::ScalarField>, (index, coeff)| {
+                    lc + (*coeff, make_index(*index))
+                },
             )
         };
 
@@ -137,14 +144,14 @@ pub mod tests {
     use ark_std::rand::SeedableRng;
     use ark_std::UniformRand;
 
-    pub fn generate_params_and_test_circuit<E: PairingEngine>(
+    pub fn generate_params_and_test_circuit<E: Pairing>(
         r1cs_file_path: &str,
         commit_witness_count: usize,
-        wires: Option<Vec<E::Fr>>,
-    ) -> ConstraintSystemRef<E::Fr> {
+        wires: Option<Vec<E::ScalarField>>,
+    ) -> ConstraintSystemRef<E::ScalarField> {
         let mut circuit = CircomCircuit::<E>::from_r1cs_file(abs_path(r1cs_file_path)).unwrap();
 
-        let cs = ConstraintSystem::<E::Fr>::new_ref();
+        let cs = ConstraintSystem::<E::ScalarField>::new_ref();
         circuit.clone().generate_constraints(cs.clone()).unwrap();
 
         assert_eq!(cs.num_instance_variables(), circuit.r1cs.num_public);
@@ -162,7 +169,7 @@ pub mod tests {
 
         if wires.is_some() {
             circuit.set_wires(wires.unwrap());
-            let cs = ConstraintSystem::<E::Fr>::new_ref();
+            let cs = ConstraintSystem::<E::ScalarField>::new_ref();
             circuit.clone().generate_constraints(cs.clone()).unwrap();
             assert!(cs.is_satisfied().unwrap());
         }
@@ -170,7 +177,7 @@ pub mod tests {
         return cs;
     }
 
-    pub fn set_circuit_wires<E: PairingEngine, I: IntoIterator<Item = (String, Vec<E::Fr>)>>(
+    pub fn set_circuit_wires<E: Pairing, I: IntoIterator<Item = (String, Vec<E::ScalarField>)>>(
         circuit: &mut CircomCircuit<E>,
         wasm_file_path: &str,
         inputs: I,
@@ -183,10 +190,10 @@ pub mod tests {
 
     #[test]
     fn multiply2() {
-        fn check<E: PairingEngine>(
+        fn check<E: Pairing>(
             r1cs_file_path: &str,
             commit_witness_count: usize,
-            wits: Option<Vec<E::Fr>>,
+            wits: Option<Vec<E::ScalarField>>,
         ) {
             let cs =
                 generate_params_and_test_circuit::<E>(r1cs_file_path, commit_witness_count, wits);
@@ -200,11 +207,11 @@ pub mod tests {
         let wits = vec![1, 33, 3, 11];
         let bn_wits = wits
             .iter()
-            .map(|w| <Bn254 as PairingEngine>::Fr::from(*w))
+            .map(|w| <Bn254 as Pairing>::ScalarField::from(*w))
             .collect::<Vec<_>>();
         let bls_wits = wits
             .iter()
-            .map(|w| <Bls12_381 as PairingEngine>::Fr::from(*w))
+            .map(|w| <Bls12_381 as Pairing>::ScalarField::from(*w))
             .collect::<Vec<_>>();
 
         check::<Bn254>(bn_r1cs_file_path, 0, Some(bn_wits.clone()));
@@ -217,10 +224,10 @@ pub mod tests {
 
     #[test]
     fn test_1() {
-        fn check<E: PairingEngine>(
+        fn check<E: Pairing>(
             r1cs_file_path: &str,
             commit_witness_count: usize,
-            wits: Option<Vec<E::Fr>>,
+            wits: Option<Vec<E::ScalarField>>,
         ) {
             let cs =
                 generate_params_and_test_circuit::<E>(r1cs_file_path, commit_witness_count, wits);
@@ -232,11 +239,11 @@ pub mod tests {
         let wits = vec![1, 35, 3, 9];
         let bn_wits = wits
             .iter()
-            .map(|w| <Bn254 as PairingEngine>::Fr::from(*w))
+            .map(|w| <Bn254 as Pairing>::ScalarField::from(*w))
             .collect::<Vec<_>>();
         let bls_wits = wits
             .iter()
-            .map(|w| <Bls12_381 as PairingEngine>::Fr::from(*w))
+            .map(|w| <Bls12_381 as Pairing>::ScalarField::from(*w))
             .collect::<Vec<_>>();
         check::<Bn254>("test-vectors/bn128/test1.r1cs", 1, Some(bn_wits.clone()));
         check::<Bn254>("test-vectors/bn128/test1.r1cs", 0, Some(bn_wits));
@@ -250,10 +257,10 @@ pub mod tests {
 
     #[test]
     fn test_2() {
-        fn check<E: PairingEngine>(
+        fn check<E: Pairing>(
             r1cs_file_path: &str,
             commit_witness_count: usize,
-            wits: Option<Vec<E::Fr>>,
+            wits: Option<Vec<E::ScalarField>>,
         ) {
             let cs =
                 generate_params_and_test_circuit::<E>(r1cs_file_path, commit_witness_count, wits);
@@ -267,11 +274,11 @@ pub mod tests {
         let wits = vec![1, 12, 1, 2, 1, 4];
         let bn_wits = wits
             .iter()
-            .map(|w| <Bn254 as PairingEngine>::Fr::from(*w))
+            .map(|w| <Bn254 as Pairing>::ScalarField::from(*w))
             .collect::<Vec<_>>();
         let bls_wits = wits
             .iter()
-            .map(|w| <Bls12_381 as PairingEngine>::Fr::from(*w))
+            .map(|w| <Bls12_381 as Pairing>::ScalarField::from(*w))
             .collect::<Vec<_>>();
 
         check::<Bn254>(bn_r1cs_file_path, 0, Some(bn_wits.clone()));
@@ -284,10 +291,10 @@ pub mod tests {
 
     #[test]
     fn test_3() {
-        fn check<E: PairingEngine>(
+        fn check<E: Pairing>(
             r1cs_file_path: &str,
             commit_witness_count: usize,
-            wits: Option<Vec<E::Fr>>,
+            wits: Option<Vec<E::ScalarField>>,
         ) {
             let cs =
                 generate_params_and_test_circuit::<E>(r1cs_file_path, commit_witness_count, wits);
@@ -310,10 +317,10 @@ pub mod tests {
 
     #[test]
     fn test_4() {
-        fn check<E: PairingEngine>(
+        fn check<E: Pairing>(
             r1cs_file_path: &str,
             commit_witness_count: usize,
-            wits: Option<Vec<E::Fr>>,
+            wits: Option<Vec<E::ScalarField>>,
         ) {
             let cs =
                 generate_params_and_test_circuit::<E>(r1cs_file_path, commit_witness_count, wits);
@@ -430,11 +437,7 @@ pub mod tests {
 
     #[test]
     fn divide_by_24() {
-        fn check<E: PairingEngine, R: RngCore>(
-            r1cs_file_path: &str,
-            wasm_file_path: &str,
-            rng: &mut R,
-        ) {
+        fn check<E: Pairing, R: RngCore>(r1cs_file_path: &str, wasm_file_path: &str, rng: &mut R) {
             let mut circuit = CircomCircuit::<E>::from_r1cs_file(abs_path(r1cs_file_path)).unwrap();
 
             let mut non_0_rems = 0;
@@ -449,14 +452,14 @@ pub mod tests {
                     non_0_rems += 1;
                 }
                 let mut inputs = std::collections::HashMap::new();
-                inputs.insert("in1".to_string(), vec![E::Fr::from(a)]);
-                inputs.insert("in2".to_string(), vec![E::Fr::from(b)]);
+                inputs.insert("in1".to_string(), vec![E::ScalarField::from(a)]);
+                inputs.insert("in2".to_string(), vec![E::ScalarField::from(b)]);
                 set_circuit_wires(&mut circuit, wasm_file_path, inputs.clone());
 
                 let wires = circuit.wires.clone().unwrap();
                 assert!(wires[0].is_one());
-                assert_eq!(wires[1], E::Fr::from(q));
-                assert_eq!(wires[2], E::Fr::from(r));
+                assert_eq!(wires[1], E::ScalarField::from(q));
+                assert_eq!(wires[2], E::ScalarField::from(r));
 
                 generate_params_and_test_circuit::<E>(r1cs_file_path, 2, Some(wires));
             }

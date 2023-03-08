@@ -1,12 +1,7 @@
-use ark_ec::{AffineCurve, PairingEngine, ProjectiveCurve};
+use ark_ec::{pairing::Pairing, AffineRepr, CurveGroup};
 use ark_ff::PrimeField;
-use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, SerializationError};
-use ark_std::{
-    cfg_iter,
-    fmt::Debug,
-    io::{Read, Write},
-    vec::Vec,
-};
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
+use ark_std::{cfg_iter, fmt::Debug, vec::Vec};
 
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
@@ -43,7 +38,7 @@ use super::error::AggregationError;
 /// Key is a generic commitment key that is instantiated with g and h as basis,
 /// and a and b as powers.
 #[derive(Clone, Debug, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
-pub struct Key<G: AffineCurve> {
+pub struct Key<G: AffineRepr> {
     /// Exponent is a
     pub a: Vec<G>,
     /// Exponent is b
@@ -53,22 +48,22 @@ pub struct Key<G: AffineCurve> {
 /// Commitment key used by the "single" commitment on G1 values as
 /// well as in the "pair" commitment.
 /// It contains $\{h^a^i\}_{i=1}^n$ and $\{h^b^i\}_{i=1}^n$
-pub type VKey<E> = Key<<E as PairingEngine>::G2Affine>;
+pub type VKey<E> = Key<<E as Pairing>::G2Affine>;
 
 /// Commitment key used by the "pair" commitment. Note the sequence of
 /// powers starts at $n$ already.
 /// It contains $\{g^{a^{n+i}}\}_{i=1}^n$ and $\{g^{b^{n+i}}\}_{i=1}^n$
-pub type WKey<E> = Key<<E as PairingEngine>::G1Affine>;
+pub type WKey<E> = Key<<E as Pairing>::G1Affine>;
 
-#[derive(Clone, Debug)]
-pub struct PreparedVKey<E: PairingEngine> {
+#[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize)]
+pub struct PreparedVKey<E: Pairing> {
     /// Exponent is a
-    pub a: Vec<<E as PairingEngine>::G2Prepared>,
+    pub a: Vec<<E as Pairing>::G2Prepared>,
     /// Exponent is b
-    pub b: Vec<<E as PairingEngine>::G2Prepared>,
+    pub b: Vec<<E as Pairing>::G2Prepared>,
 }
 
-impl<E: PairingEngine> From<&VKey<E>> for PreparedVKey<E> {
+impl<E: Pairing> From<&VKey<E>> for PreparedVKey<E> {
     fn from(other: &VKey<E>) -> Self {
         let a = cfg_iter!(other.a)
             .map(|e| E::G2Prepared::from(*e))
@@ -80,7 +75,7 @@ impl<E: PairingEngine> From<&VKey<E>> for PreparedVKey<E> {
     }
 }
 
-impl<E: PairingEngine> PreparedVKey<E> {
+impl<E: Pairing> PreparedVKey<E> {
     pub fn len(&self) -> usize {
         self.a.len()
     }
@@ -95,7 +90,7 @@ impl<E: PairingEngine> PreparedVKey<E> {
 
 impl<G> Key<G>
 where
-    G: AffineCurve,
+    G: AffineRepr,
 {
     /// Returns true if commitment keys have the exact required length.
     /// It is necessary for the IPP scheme to work that commitment
@@ -122,20 +117,20 @@ where
         if self.a.len() != s_vec.len() {
             return Err(AggregationError::InvalidKeyLength);
         }
-        let (a, b): (Vec<G::Projective>, Vec<G::Projective>) = cfg_iter!(self.a)
+        let (a, b): (Vec<G::Group>, Vec<G::Group>) = cfg_iter!(self.a)
             .zip(cfg_iter!(self.b))
             .zip(cfg_iter!(s_vec))
             .map(|((ap, bp), si)| {
-                let s_repr = si.into_repr();
-                let v1s = ap.mul(s_repr);
-                let v2s = bp.mul(s_repr);
+                let s_repr = si.into_bigint();
+                let v1s = ap.mul_bigint(s_repr);
+                let v2s = bp.mul_bigint(s_repr);
                 (v1s, v2s)
             })
             .unzip();
 
         Ok(Self {
-            a: G::Projective::batch_normalization_into_affine(&a),
-            b: G::Projective::batch_normalization_into_affine(&b),
+            a: G::Group::normalize_batch(&a),
+            b: G::Group::normalize_batch(&b),
         })
     }
 
@@ -163,23 +158,23 @@ where
         if left.a.len() != right.a.len() {
             return Err(AggregationError::InvalidKeyLength);
         }
-        let (a, b): (Vec<G::Projective>, Vec<G::Projective>) = cfg_iter!(left.a)
+        let (a, b): (Vec<G::Group>, Vec<G::Group>) = cfg_iter!(left.a)
             .zip(cfg_iter!(left.b))
             .zip(cfg_iter!(right.a))
             .zip(cfg_iter!(right.b))
             .map(|(((left_a, left_b), right_a), right_b)| {
-                let s_repr = scale.into_repr();
-                let mut ra = right_a.mul(s_repr);
-                let mut rb = right_b.mul(s_repr);
-                ra.add_assign_mixed(left_a);
-                rb.add_assign_mixed(left_b);
+                let s_repr = scale.into_bigint();
+                let mut ra = right_a.mul_bigint(s_repr);
+                let mut rb = right_b.mul_bigint(s_repr);
+                ra += left_a;
+                rb += left_b;
                 (ra, rb)
             })
             .unzip();
 
         Ok(Self {
-            a: G::Projective::batch_normalization_into_affine(&a),
-            b: G::Projective::batch_normalization_into_affine(&b),
+            a: G::Group::normalize_batch(&a),
+            b: G::Group::normalize_batch(&b),
         })
     }
 

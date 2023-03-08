@@ -17,7 +17,7 @@ use ark_std::UniformRand;
 use std::time::{Duration, Instant};
 
 // Bring in some tools for using pairing-friendly curves
-use ark_ec::{PairingEngine, ProjectiveCurve};
+use ark_ec::{pairing::Pairing, CurveGroup};
 use ark_ff::Field;
 
 // We'll use these interfaces to construct our circuit.
@@ -148,7 +148,7 @@ impl<'a, F: Field> ConstraintSynthesizer<F> for MiMCDemo<'a, F> {
     }
 }
 
-fn mimc_legogroth16<E: PairingEngine>() {
+fn mimc_legogroth16<E: Pairing>() {
     // We're going to use the LegoGroth16 proving system.
     // This proof has a commitment to both left and right inputs
 
@@ -163,24 +163,24 @@ fn mimc_legogroth16<E: PairingEngine>() {
 
     // Generate the MiMC round constants
     let constants = (0..MIMC_ROUNDS)
-        .map(|_| E::Fr::rand(&mut rng))
+        .map(|_| E::ScalarField::rand(&mut rng))
         .collect::<Vec<_>>();
 
     println!("Creating parameters...");
 
     // Need 3 bases, 2 for witnesses xl and xr and 1 for randomness (link_v)
     let pedersen_gens = (0..3)
-        .map(|_| E::G1Projective::rand(&mut rng).into_affine())
+        .map(|_| E::G1::rand(&mut rng).into_affine())
         .collect::<Vec<_>>();
-    let g1 = E::G1Projective::rand(&mut rng).into_affine();
-    let g2 = E::G2Projective::rand(&mut rng).into_affine();
+    let g1 = E::G1::rand(&mut rng).into_affine();
+    let g2 = E::G2::rand(&mut rng).into_affine();
     let link_gens = LinkPublicGenerators {
         pedersen_gens,
         g1,
         g2,
     };
 
-    let c = MiMCDemo::<E::Fr> {
+    let c = MiMCDemo::<E::ScalarField> {
         xl: None,
         xr: None,
         constants: &constants,
@@ -215,8 +215,8 @@ fn mimc_legogroth16<E: PairingEngine>() {
 
     for _ in 0..SAMPLES {
         // Generate a random preimage and compute the image
-        let xl = E::Fr::rand(&mut rng);
-        let xr = E::Fr::rand(&mut rng);
+        let xl = E::ScalarField::rand(&mut rng);
+        let xr = E::ScalarField::rand(&mut rng);
         let image = mimc(xl, xr, &constants);
 
         {
@@ -229,9 +229,9 @@ fn mimc_legogroth16<E: PairingEngine>() {
             };
 
             // Randomness for the committed witness in proof.d
-            let v = E::Fr::rand(&mut rng);
+            let v = E::ScalarField::rand(&mut rng);
             // Randomness for the committed witness in CP_link
-            let link_v = E::Fr::rand(&mut rng);
+            let link_v = E::ScalarField::rand(&mut rng);
 
             let start = Instant::now();
             // Create a LegoGro16 proof with CP_link.
@@ -267,7 +267,7 @@ fn mimc_legogroth16<E: PairingEngine>() {
             verify_proof(&pvk, &re_rand_proof, &[image]).unwrap();
 
             let start = Instant::now();
-            let new_v = E::Fr::rand(&mut rng);
+            let new_v = E::ScalarField::rand(&mut rng);
             let re_rand_proof_1 = rerandomize_proof_1(
                 &proof,
                 v,

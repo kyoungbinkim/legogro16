@@ -1,17 +1,14 @@
 //! Utils for matrix and vector operations
 
-use ark_ec::msm::{FixedBaseMSM, VariableBaseMSM};
-use ark_ec::{AffineCurve, PairingEngine, ProjectiveCurve};
+use ark_ec::scalar_mul::fixed_base::FixedBase;
+use ark_ec::{pairing::Pairing, AffineRepr, CurveGroup, VariableBaseMSM};
 use ark_ff::{PrimeField, Zero};
-use ark_std::cfg_iter;
 use ark_std::marker::PhantomData;
 use ark_std::ops::{AddAssign, Mul};
 use ark_std::vec;
 use ark_std::vec::Vec;
 
 use crate::link::error::LinkError;
-#[cfg(feature = "parallel")]
-use rayon::prelude::*;
 
 /// CoeffPos: A struct to help build sparse matrices.
 #[derive(Clone, Debug)]
@@ -75,18 +72,18 @@ impl<T: Copy> SparseMatrix<T> {
     }
 }
 
-pub struct SparseLinAlgebra<PE: PairingEngine> {
+pub struct SparseLinAlgebra<PE: Pairing> {
     pairing_engine_type: PhantomData<PE>,
 }
 
-impl<PE: PairingEngine> SparseLinAlgebra<PE> {
+impl<PE: Pairing> SparseLinAlgebra<PE> {
     /// Inner product of a column of a sparse matrix and another (sparse) vector
     /// this is basically a multi-exp
     pub fn sparse_inner_product(
-        v: &Vec<PE::Fr>,
+        v: &Vec<PE::ScalarField>,
         w: &Col<PE::G1Affine>,
     ) -> Result<PE::G1Affine, LinkError> {
-        let mut res: PE::G1Projective = PE::G1Projective::zero();
+        let mut res = PE::G1::zero();
         for coeffpos in w {
             let g = coeffpos.val;
             let i = coeffpos.pos;
@@ -107,7 +104,7 @@ impl<PE: PairingEngine> SparseLinAlgebra<PE> {
     /// matrix multiplication `m^T \dot v` where `m^T` is the transpose of `m`.
     /// v has dimensions `v.len() x 1` and m has dimensions `nr x nc`. Returns a matrix of dimension `nr x 1`
     pub fn sparse_vector_matrix_mult(
-        v: &Vec<PE::Fr>,
+        v: &Vec<PE::ScalarField>,
         m: &SparseMatrix<PE::G1Affine>,
     ) -> Result<Vec<PE::G1Affine>, LinkError> {
         // the result should contain every column of m multiplied by v
@@ -120,27 +117,28 @@ impl<PE: PairingEngine> SparseLinAlgebra<PE> {
 }
 
 /// MSM between a scalar vector and a G1 vector
-pub fn inner_product<PE: PairingEngine>(a: &[PE::Fr], b: &[PE::G1Affine]) -> PE::G1Affine {
-    let a = cfg_iter!(a).map(|a| a.into_repr()).collect::<Vec<_>>();
-    VariableBaseMSM::multi_scalar_mul(b, &a).into_affine()
+pub fn inner_product<PE: Pairing>(a: &[PE::ScalarField], b: &[PE::G1Affine]) -> PE::G1Affine {
+    PE::G1::msm_unchecked(b, &a).into_affine()
 }
 
 /// Scale given vector `v` by scalar `a`
-pub fn scale_vector<PE: PairingEngine>(a: &PE::Fr, v: &[PE::Fr]) -> Vec<PE::Fr> {
-    let mut res: Vec<PE::Fr> = Vec::with_capacity(v.len());
+pub fn scale_vector<PE: Pairing>(
+    a: &PE::ScalarField,
+    v: &[PE::ScalarField],
+) -> Vec<PE::ScalarField> {
+    let mut res: Vec<PE::ScalarField> = Vec::with_capacity(v.len());
     for i in 0..v.len() {
-        let x: PE::Fr = a.mul(&v[i]);
+        let x: PE::ScalarField = a.mul(&v[i]);
         res.push(x);
     }
     res
 }
 
 /// Given a group element `g` and vector `multiples` of scalars, returns a vector with elements `v_i * g`
-pub fn multiples_of_g<G: AffineCurve>(g: &G, multiples: &[G::ScalarField]) -> Vec<G> {
-    let scalar_size = G::ScalarField::size_in_bits();
-    let window_size = FixedBaseMSM::get_mul_window_size(multiples.len());
-    let table = FixedBaseMSM::get_window_table(scalar_size, window_size, g.into_projective());
-    let mut muls = FixedBaseMSM::multi_scalar_mul(scalar_size, window_size, &table, multiples);
-    G::Projective::batch_normalization(&mut muls);
-    muls.into_iter().map(|v| v.into()).collect()
+pub fn multiples_of_g<G: AffineRepr>(g: &G, multiples: &[G::ScalarField]) -> Vec<G> {
+    let scalar_size = G::ScalarField::MODULUS_BIT_SIZE as usize;
+    let window_size = FixedBase::get_mul_window_size(multiples.len());
+    let table = FixedBase::get_window_table(scalar_size, window_size, g.into_group());
+    let muls = FixedBase::msm(scalar_size, window_size, &table, multiples);
+    G::Group::normalize_batch(&muls)
 }

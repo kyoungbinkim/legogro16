@@ -8,7 +8,7 @@ use crate::{
 };
 use ark_bls12_381::Bls12_381;
 use ark_bn254::Bn254;
-use ark_ec::PairingEngine;
+use ark_ec::pairing::Pairing;
 use ark_ff::{Field, One, PrimeField, Zero};
 use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystem};
 use ark_std::rand::prelude::StdRng;
@@ -25,7 +25,7 @@ pub fn abs_path(relative_path: &str) -> String {
     path.to_string_lossy().to_string()
 }
 
-pub fn gen_params<E: PairingEngine>(
+pub fn gen_params<E: Pairing>(
     commit_witness_count: usize,
     circuit: CircomCircuit<E>,
 ) -> (ProvingKeyWithLink<E>, ProvingKey<E>) {
@@ -45,12 +45,12 @@ pub fn gen_params<E: PairingEngine>(
     (params_link, params)
 }
 
-pub fn prove_and_verify_circuit<E: PairingEngine>(
+pub fn prove_and_verify_circuit<E: Pairing>(
     circuit: CircomCircuit<E>,
     params: &ProvingKey<E>,
     commit_witness_count: usize,
-) -> Vec<E::Fr> {
-    let cs = ConstraintSystem::<E::Fr>::new_ref();
+) -> Vec<E::ScalarField> {
+    let cs = ConstraintSystem::<E::ScalarField>::new_ref();
     circuit.clone().generate_constraints(cs.clone()).unwrap();
     assert!(cs.is_satisfied().unwrap());
 
@@ -65,7 +65,7 @@ pub fn prove_and_verify_circuit<E: PairingEngine>(
         .collect::<Vec<_>>();
     // Randomness for the committed witness in proof.d
     let mut rng = StdRng::seed_from_u64(300u64);
-    let v = E::Fr::rand(&mut rng);
+    let v = E::ScalarField::rand(&mut rng);
     let proof = create_random_proof(circuit, v, params, &mut rng).unwrap();
     println!("Proof generated");
 
@@ -85,15 +85,15 @@ pub fn prove_and_verify_circuit<E: PairingEngine>(
 }
 
 pub fn generate_params_prove_and_verify<
-    E: PairingEngine,
-    I: IntoIterator<Item = (String, Vec<E::Fr>)>,
+    E: Pairing,
+    I: IntoIterator<Item = (String, Vec<E::ScalarField>)>,
 >(
     r1cs_file_path: &str,
     wasm_file_path: &str,
     commit_witness_count: usize,
     inputs: I,
     num_inputs: u32,
-) -> Vec<E::Fr> {
+) -> Vec<E::ScalarField> {
     let mut circuit = CircomCircuit::<E>::from_r1cs_file(abs_path(r1cs_file_path)).unwrap();
 
     let (_, params) = gen_params::<E>(commit_witness_count, circuit.clone());
@@ -108,10 +108,10 @@ pub fn generate_params_prove_and_verify<
     prove_and_verify_circuit(circuit, &params, commit_witness_count)
 }
 
-fn multiply2<E: PairingEngine>(r1cs_file_path: &str, wasm_file_path: &str) {
+fn multiply2<E: Pairing>(r1cs_file_path: &str, wasm_file_path: &str) {
     let mut rng = StdRng::seed_from_u64(100u64);
-    let a = E::Fr::rand(&mut rng);
-    let b = E::Fr::rand(&mut rng);
+    let a = E::ScalarField::rand(&mut rng);
+    let b = E::ScalarField::rand(&mut rng);
 
     let mut inputs = HashMap::new();
     inputs.insert("a".to_string(), vec![a]);
@@ -129,14 +129,14 @@ fn multiply2<E: PairingEngine>(r1cs_file_path: &str, wasm_file_path: &str) {
     assert_eq!(a * b, public[0]);
 }
 
-fn test3<E: PairingEngine>(r1cs_file_path: &str, wasm_file_path: &str) {
+fn test3<E: Pairing>(r1cs_file_path: &str, wasm_file_path: &str) {
     let mut rng = StdRng::seed_from_u64(100);
-    let x = E::Fr::rand(&mut rng);
-    let y = E::Fr::rand(&mut rng);
-    let a = E::Fr::rand(&mut rng);
-    let b = E::Fr::rand(&mut rng);
-    let c = E::Fr::rand(&mut rng);
-    let d = E::Fr::rand(&mut rng);
+    let x = E::ScalarField::rand(&mut rng);
+    let y = E::ScalarField::rand(&mut rng);
+    let a = E::ScalarField::rand(&mut rng);
+    let b = E::ScalarField::rand(&mut rng);
+    let c = E::ScalarField::rand(&mut rng);
+    let d = E::ScalarField::rand(&mut rng);
 
     let mut inputs = HashMap::new();
     inputs.insert("x".to_string(), vec![x]);
@@ -163,16 +163,16 @@ fn test3<E: PairingEngine>(r1cs_file_path: &str, wasm_file_path: &str) {
     assert_eq!(y, public[3]);
 }
 
-fn test4<E: PairingEngine>(r1cs_file_path: &str, wasm_file_path: &str) {
+fn test4<E: Pairing>(r1cs_file_path: &str, wasm_file_path: &str) {
     let mut rng = StdRng::seed_from_u64(100u64);
-    let x = E::Fr::rand(&mut rng);
-    let y = E::Fr::rand(&mut rng);
-    let p = E::Fr::rand(&mut rng);
-    let q = E::Fr::rand(&mut rng);
-    let a = E::Fr::rand(&mut rng);
-    let b = E::Fr::rand(&mut rng);
-    let r = E::Fr::rand(&mut rng);
-    let s = E::Fr::rand(&mut rng);
+    let x = E::ScalarField::rand(&mut rng);
+    let y = E::ScalarField::rand(&mut rng);
+    let p = E::ScalarField::rand(&mut rng);
+    let q = E::ScalarField::rand(&mut rng);
+    let a = E::ScalarField::rand(&mut rng);
+    let b = E::ScalarField::rand(&mut rng);
+    let r = E::ScalarField::rand(&mut rng);
+    let s = E::ScalarField::rand(&mut rng);
 
     let mut inputs = HashMap::new();
     inputs.insert("x".to_string(), vec![x]);
@@ -193,22 +193,22 @@ fn test4<E: PairingEngine>(r1cs_file_path: &str, wasm_file_path: &str) {
 
     assert_eq!(public.len(), 6);
 
-    let expected_z1 = a * x + b * y + E::Fr::from(10u64) * p * q
-        - E::Fr::from(19u64) * r.square() * r * p
-        + E::Fr::from(55u64) * s.square().square() * q.square() * q
-        - E::Fr::from(3u64) * x.square()
-        + E::Fr::from(6u64) * x * y
-        - E::Fr::from(13u64) * y.square() * y
+    let expected_z1 = a * x + b * y + E::ScalarField::from(10u64) * p * q
+        - E::ScalarField::from(19u64) * r.square() * r * p
+        + E::ScalarField::from(55u64) * s.square().square() * q.square() * q
+        - E::ScalarField::from(3u64) * x.square()
+        + E::ScalarField::from(6u64) * x * y
+        - E::ScalarField::from(13u64) * y.square() * y
         - r * s * x
-        + E::Fr::from(5u64) * a * b * y
-        - E::Fr::from(32u64) * a * x * y
-        - E::Fr::from(2u64) * x * y * p * q
-        - E::Fr::from(100u64);
+        + E::ScalarField::from(5u64) * a * b * y
+        - E::ScalarField::from(32u64) * a * x * y
+        - E::ScalarField::from(2u64) * x * y * p * q
+        - E::ScalarField::from(100u64);
     assert_eq!(expected_z1, public[0]);
 
-    let expected_z2 = a.square() * a * y + E::Fr::from(3u64) * b.square() * x
-        - E::Fr::from(20u64) * x.square() * y.square()
-        + E::Fr::from(45u64);
+    let expected_z2 = a.square() * a * y + E::ScalarField::from(3u64) * b.square() * x
+        - E::ScalarField::from(20u64) * x.square() * y.square()
+        + E::ScalarField::from(45u64);
     assert_eq!(expected_z2, public[1]);
 
     assert_eq!(a, public[2]);
@@ -217,10 +217,10 @@ fn test4<E: PairingEngine>(r1cs_file_path: &str, wasm_file_path: &str) {
     assert_eq!(s, public[5]);
 }
 
-fn nconstraints<E: PairingEngine>(
+fn nconstraints<E: Pairing>(
     r1cs_file_path: &str,
     wasm_file_path: &str,
-    input: E::Fr,
+    input: E::ScalarField,
     commit_witness_count: usize,
     num_constraints: u64,
 ) {
@@ -237,12 +237,12 @@ fn nconstraints<E: PairingEngine>(
     for i in 1..num_constraints {
         // accum = accum * accum + i;
         accum.square_in_place();
-        accum.add_assign(E::Fr::from(i));
+        accum.add_assign(E::ScalarField::from(i));
     }
     assert_eq!(public[0], accum);
 }
 
-fn multiply_n<E: PairingEngine>(
+fn multiply_n<E: Pairing>(
     r1cs_file_path: &str,
     wasm_file_path: &str,
     commit_witness_count: usize,
@@ -251,7 +251,7 @@ fn multiply_n<E: PairingEngine>(
     let mut rng = StdRng::seed_from_u64(100u64);
     let mut inputs = HashMap::new();
     let inp = (0..input_arr_size)
-        .map(|_| E::Fr::rand(&mut rng))
+        .map(|_| E::ScalarField::rand(&mut rng))
         .collect::<Vec<_>>();
     inputs.insert("in".to_string(), inp.clone());
     let public = generate_params_prove_and_verify::<E, _>(
@@ -261,14 +261,14 @@ fn multiply_n<E: PairingEngine>(
         inputs.into_iter(),
         input_arr_size as u32,
     );
-    let mut expected = E::Fr::from(1u64);
+    let mut expected = E::ScalarField::from(1u64);
     for i in inp {
         expected *= i;
     }
     assert_eq!(public[0], expected);
 }
 
-fn multiply_2_bounded<E: PairingEngine>(
+fn multiply_2_bounded<E: Pairing>(
     r1cs_file_path: &str,
     wasm_file_path: &str,
     commit_witness_count: usize,
@@ -283,8 +283,8 @@ fn multiply_2_bounded<E: PairingEngine>(
     while b == 0 {
         b = u64::rand(&mut rng);
     }
-    inputs.insert("a".to_string(), vec![E::Fr::from(a)]);
-    inputs.insert("b".to_string(), vec![E::Fr::from(b)]);
+    inputs.insert("a".to_string(), vec![E::ScalarField::from(a)]);
+    inputs.insert("b".to_string(), vec![E::ScalarField::from(b)]);
     let public = generate_params_prove_and_verify::<E, _>(
         r1cs_file_path,
         wasm_file_path,
@@ -292,10 +292,10 @@ fn multiply_2_bounded<E: PairingEngine>(
         inputs.into_iter(),
         2,
     );
-    assert_eq!(public[0], E::Fr::from(a as u128 * b as u128));
+    assert_eq!(public[0], E::ScalarField::from(a as u128 * b as u128));
 }
 
-fn mimc<E: PairingEngine>(
+fn mimc<E: Pairing>(
     r1cs_file_path: &str,
     wasm_file_path: &str,
     commit_witness_count: usize,
@@ -304,10 +304,10 @@ fn mimc<E: PairingEngine>(
     let mut rng = StdRng::seed_from_u64(100u64);
     let mut inputs = HashMap::new();
     let inp = (0..input_arr_size)
-        .map(|_| E::Fr::rand(&mut rng))
+        .map(|_| E::ScalarField::rand(&mut rng))
         .collect::<Vec<_>>();
     inputs.insert("in".to_string(), inp.clone());
-    inputs.insert("k".to_string(), vec![E::Fr::from(0u64)]);
+    inputs.insert("k".to_string(), vec![E::ScalarField::from(0u64)]);
     let public = generate_params_prove_and_verify::<E, _>(
         r1cs_file_path,
         wasm_file_path,
@@ -318,7 +318,7 @@ fn mimc<E: PairingEngine>(
     assert_eq!(public.len(), 1);
 }
 
-fn mimcsponge<E: PairingEngine>(
+fn mimcsponge<E: Pairing>(
     r1cs_file_path: &str,
     wasm_file_path: &str,
     commit_witness_count: usize,
@@ -328,10 +328,10 @@ fn mimcsponge<E: PairingEngine>(
     let mut rng = StdRng::seed_from_u64(100u64);
     let mut inputs = HashMap::new();
     let inp = (0..input_arr_size)
-        .map(|_| E::Fr::rand(&mut rng))
+        .map(|_| E::ScalarField::rand(&mut rng))
         .collect::<Vec<_>>();
     inputs.insert("in".to_string(), inp.clone());
-    inputs.insert("k".to_string(), vec![E::Fr::from(0u64)]);
+    inputs.insert("k".to_string(), vec![E::ScalarField::from(0u64)]);
     let public = generate_params_prove_and_verify::<E, _>(
         r1cs_file_path,
         wasm_file_path,
@@ -342,7 +342,7 @@ fn mimcsponge<E: PairingEngine>(
     assert_eq!(public.len(), output_arr_size);
 }
 
-fn poseidon<E: PairingEngine>(
+fn poseidon<E: Pairing>(
     r1cs_file_path: &str,
     wasm_file_path: &str,
     commit_witness_count: usize,
@@ -351,7 +351,7 @@ fn poseidon<E: PairingEngine>(
     let mut rng = StdRng::seed_from_u64(100u64);
     let mut inputs = HashMap::new();
     let inp = (0..input_arr_size)
-        .map(|_| E::Fr::rand(&mut rng))
+        .map(|_| E::ScalarField::rand(&mut rng))
         .collect::<Vec<_>>();
     inputs.insert("in".to_string(), inp.clone());
     let public = generate_params_prove_and_verify::<E, _>(
@@ -364,7 +364,7 @@ fn poseidon<E: PairingEngine>(
     assert_eq!(public.len(), 1);
 }
 
-fn less_than_32_bits<E: PairingEngine>(
+fn less_than_32_bits<E: Pairing>(
     r1cs_file_path: &str,
     wasm_file_path: &str,
     commit_witness_count: usize,
@@ -379,9 +379,15 @@ fn less_than_32_bits<E: PairingEngine>(
             let a = u32::rand(&mut rng);
             let b = u32::rand(&mut rng);
             if a < b {
-                (E::Fr::from(a as u64), E::Fr::from(b as u64))
+                (
+                    E::ScalarField::from(a as u64),
+                    E::ScalarField::from(b as u64),
+                )
             } else {
-                (E::Fr::from(b as u64), E::Fr::from(a as u64))
+                (
+                    E::ScalarField::from(b as u64),
+                    E::ScalarField::from(a as u64),
+                )
             }
         };
 
@@ -404,7 +410,7 @@ fn less_than_32_bits<E: PairingEngine>(
     }
 }
 
-fn all_different_10<E: PairingEngine>(
+fn all_different_10<E: Pairing>(
     r1cs_file_path: &str,
     wasm_file_path: &str,
     commit_witness_count: usize,
@@ -420,7 +426,7 @@ fn all_different_10<E: PairingEngine>(
     for _ in 0..10 {
         let mut inp = BTreeSet::new();
         while inp.len() != 10 {
-            inp.insert(E::Fr::rand(&mut rng));
+            inp.insert(E::ScalarField::rand(&mut rng));
         }
         let mut inp = inp.into_iter().collect::<Vec<_>>();
         let mut inputs = HashMap::new();
@@ -449,7 +455,7 @@ fn all_different_10<E: PairingEngine>(
     }
 }
 
-fn not_equal_public<E: PairingEngine>(
+fn not_equal_public<E: Pairing>(
     r1cs_file_path: &str,
     wasm_file_path: &str,
     commit_witness_count: usize,
@@ -463,8 +469,8 @@ fn not_equal_public<E: PairingEngine>(
         .unwrap();
 
     for _ in 0..10 {
-        let a = E::Fr::rand(&mut rng);
-        let b = E::Fr::rand(&mut rng);
+        let a = E::ScalarField::rand(&mut rng);
+        let b = E::ScalarField::rand(&mut rng);
         let mut inputs = HashMap::new();
 
         // Inputs are unequal
@@ -487,7 +493,7 @@ fn not_equal_public<E: PairingEngine>(
     }
 }
 
-fn less_than_public_64_bits<E: PairingEngine>(
+fn less_than_public_64_bits<E: Pairing>(
     r1cs_file_path: &str,
     wasm_file_path: &str,
     commit_witness_count: usize,
@@ -502,9 +508,9 @@ fn less_than_public_64_bits<E: PairingEngine>(
             let a = u64::rand(&mut rng);
             let b = u64::rand(&mut rng);
             if a < b {
-                (E::Fr::from(a), E::Fr::from(b))
+                (E::ScalarField::from(a), E::ScalarField::from(b))
             } else {
-                (E::Fr::from(b), E::Fr::from(a))
+                (E::ScalarField::from(b), E::ScalarField::from(a))
             }
         };
 
@@ -531,7 +537,7 @@ fn less_than_public_64_bits<E: PairingEngine>(
     }
 }
 
-fn average_n<E: PairingEngine>(r1cs_file_path: &str, wasm_file_path: &str, n: u64) {
+fn average_n<E: Pairing>(r1cs_file_path: &str, wasm_file_path: &str, n: u64) {
     let mut circuit = CircomCircuit::<E>::from_r1cs_file(abs_path(r1cs_file_path)).unwrap();
 
     let (_, params) = gen_params::<E>(n as usize, circuit.clone());
@@ -543,7 +549,7 @@ fn average_n<E: PairingEngine>(r1cs_file_path: &str, wasm_file_path: &str, n: u6
     for _ in 0..n {
         let e = u64::rand(&mut rng);
         sum += e as u128;
-        inp.push(E::Fr::from(e));
+        inp.push(E::ScalarField::from(e));
     }
 
     let mut inputs = HashMap::new();
@@ -553,14 +559,10 @@ fn average_n<E: PairingEngine>(r1cs_file_path: &str, wasm_file_path: &str, n: u6
     let public = prove_and_verify_circuit(circuit.clone(), &params, n as usize);
 
     assert_eq!(public.len(), 1);
-    assert_eq!(public[0], E::Fr::from(sum / n as u128));
+    assert_eq!(public[0], E::ScalarField::from(sum / n as u128));
 }
 
-fn average_n_less_than_public<E: PairingEngine>(
-    r1cs_file_path: &str,
-    wasm_file_path: &str,
-    n: u64,
-) {
+fn average_n_less_than_public<E: Pairing>(r1cs_file_path: &str, wasm_file_path: &str, n: u64) {
     let mut circuit = CircomCircuit::<E>::from_r1cs_file(abs_path(r1cs_file_path)).unwrap();
 
     let (_, params) = gen_params::<E>(n as usize, circuit.clone());
@@ -574,33 +576,33 @@ fn average_n_less_than_public<E: PairingEngine>(
         let e = u64::rand(&mut rng);
         sum += e as u128;
         inp_.push(e);
-        inp.push(E::Fr::from(e));
+        inp.push(E::ScalarField::from(e));
     }
 
     let max = (sum / n as u128) + 1;
 
     let mut inputs = HashMap::new();
     inputs.insert("in".to_string(), inp);
-    inputs.insert("max".to_string(), vec![E::Fr::from(max)]);
+    inputs.insert("max".to_string(), vec![E::ScalarField::from(max)]);
 
     set_circuit_wires(&mut circuit, wasm_file_path, inputs.clone());
     for w in circuit.wires.clone().unwrap().into_iter().take(10) {
-        println!("{:?}", w.into_repr());
+        println!("{:?}", w.into_bigint());
     }
 
     let public = prove_and_verify_circuit(circuit.clone(), &params, n as usize);
 
     assert_eq!(public.len(), 2);
-    assert_eq!(public[0], E::Fr::from(1u64));
-    assert_eq!(public[1], E::Fr::from(max));
+    assert_eq!(public[0], E::ScalarField::from(1u64));
+    assert_eq!(public[1], E::ScalarField::from(max));
 
     // Using a number greater than 64-bit shouldn't work as the circuit only supports 64 bit inputs
-    let greater_than_64_bit = E::Fr::from(u64::MAX) + E::Fr::from(10u64);
+    let greater_than_64_bit = E::ScalarField::from(u64::MAX) + E::ScalarField::from(10u64);
     let mut sum = greater_than_64_bit.clone();
     let mut inp = vec![];
     inp.push(greater_than_64_bit);
     for i in 1..n {
-        inp.push(E::Fr::from(i));
+        inp.push(E::ScalarField::from(i));
         sum += inp[i as usize];
     }
 
@@ -609,12 +611,12 @@ fn average_n_less_than_public<E: PairingEngine>(
     inputs.insert("in".to_string(), inp);
     inputs.insert("max".to_string(), vec![max]);
     set_circuit_wires(&mut circuit, wasm_file_path, inputs.clone());
-    let cs = ConstraintSystem::<E::Fr>::new_ref();
+    let cs = ConstraintSystem::<E::ScalarField>::new_ref();
     circuit.clone().generate_constraints(cs.clone()).unwrap();
     assert!(!cs.is_satisfied().unwrap());
 }
 
-fn sum_n_less_than_public<E: PairingEngine>(r1cs_file_path: &str, wasm_file_path: &str, n: u64) {
+fn sum_n_less_than_public<E: Pairing>(r1cs_file_path: &str, wasm_file_path: &str, n: u64) {
     let mut circuit = CircomCircuit::<E>::from_r1cs_file(abs_path(r1cs_file_path)).unwrap();
 
     let (_, params) = gen_params::<E>(n as usize, circuit.clone());
@@ -626,50 +628,50 @@ fn sum_n_less_than_public<E: PairingEngine>(r1cs_file_path: &str, wasm_file_path
     for _ in 1..=n {
         let e = u64::rand(&mut rng);
         sum += e as u128;
-        inp.push(E::Fr::from(e));
+        inp.push(E::ScalarField::from(e));
     }
     let max = sum + 1;
 
     let mut inputs = HashMap::new();
     inputs.insert("in".to_string(), inp);
-    inputs.insert("max".to_string(), vec![E::Fr::from(max)]);
+    inputs.insert("max".to_string(), vec![E::ScalarField::from(max)]);
 
     set_circuit_wires(&mut circuit, wasm_file_path, inputs.clone());
     let public = prove_and_verify_circuit(circuit.clone(), &params, n as usize);
 
     assert_eq!(public.len(), 2);
-    assert_eq!(public[0], E::Fr::from(1u64));
-    assert_eq!(public[1], E::Fr::from(max));
+    assert_eq!(public[0], E::ScalarField::from(1u64));
+    assert_eq!(public[1], E::ScalarField::from(max));
 
     // Using a very large input shouldn't work even when it will make the sum smaller than max
-    let p_minus_5 = E::Fr::from(0u64) - E::Fr::from(5u64); // curve order - 5
+    let p_minus_5 = E::ScalarField::from(0u64) - E::ScalarField::from(5u64); // curve order - 5
     let mut inp = vec![];
     inp.push(p_minus_5);
     for i in 1..n {
-        inp.push(E::Fr::from(i));
+        inp.push(E::ScalarField::from(i));
     }
-    let max = E::Fr::from(300u64);
+    let max = E::ScalarField::from(300u64);
     let mut inputs = HashMap::new();
     inputs.insert("in".to_string(), inp);
     inputs.insert("max".to_string(), vec![max]);
 
     set_circuit_wires(&mut circuit, wasm_file_path, inputs.clone());
-    let cs = ConstraintSystem::<E::Fr>::new_ref();
+    let cs = ConstraintSystem::<E::ScalarField>::new_ref();
     circuit.clone().generate_constraints(cs.clone()).unwrap();
     assert!(!cs.is_satisfied().unwrap());
 }
 
-fn set_membership<E: PairingEngine>(r1cs_file_path: &str, wasm_file_path: &str, set_size: u64) {
+fn set_membership<E: Pairing>(r1cs_file_path: &str, wasm_file_path: &str, set_size: u64) {
     let mut circuit = CircomCircuit::<E>::from_r1cs_file(abs_path(r1cs_file_path)).unwrap();
 
     let (_, params) = gen_params::<E>(1, circuit.clone());
 
     let mut rng = StdRng::seed_from_u64(0);
 
-    let x = E::Fr::rand(&mut rng);
+    let x = E::ScalarField::rand(&mut rng);
     let mut set = vec![];
     for _ in 1..set_size {
-        let e = E::Fr::rand(&mut rng);
+        let e = E::ScalarField::rand(&mut rng);
         set.push(e);
     }
     set.push(x);
@@ -682,14 +684,14 @@ fn set_membership<E: PairingEngine>(r1cs_file_path: &str, wasm_file_path: &str, 
     let public = prove_and_verify_circuit(circuit.clone(), &params, 1);
 
     assert_eq!(public.len(), 6);
-    assert_eq!(public[0], E::Fr::one());
+    assert_eq!(public[0], E::ScalarField::one());
     for i in 0..set_size as usize {
         assert_eq!(public[i + 1], set[i]);
     }
 
     let mut set = vec![];
     for _ in 0..set_size {
-        let e = E::Fr::rand(&mut rng);
+        let e = E::ScalarField::rand(&mut rng);
         assert!(x != e);
         set.push(e);
     }
@@ -702,13 +704,13 @@ fn set_membership<E: PairingEngine>(r1cs_file_path: &str, wasm_file_path: &str, 
     let public = prove_and_verify_circuit(circuit.clone(), &params, 1);
 
     assert_eq!(public.len(), 6);
-    assert_eq!(public[0], E::Fr::zero());
+    assert_eq!(public[0], E::ScalarField::zero());
     for i in 0..set_size as usize {
         assert_eq!(public[i + 1], set[i]);
     }
 }
 
-fn difference_of_array_sum<E: PairingEngine>(
+fn difference_of_array_sum<E: Pairing>(
     r1cs_file_path: &str,
     wasm_file_path: &str,
     arr1_size: u64,
@@ -726,7 +728,7 @@ fn difference_of_array_sum<E: PairingEngine>(
     for _ in 0..arr1_size {
         let e = u64::rand(&mut rng);
         sum1 += e as u128;
-        inp1.push(E::Fr::from(e));
+        inp1.push(E::ScalarField::from(e));
     }
 
     let mut inp2 = vec![];
@@ -734,7 +736,7 @@ fn difference_of_array_sum<E: PairingEngine>(
     for _ in 0..arr2_size {
         let e = u64::rand(&mut rng);
         sum2 += e as u128;
-        inp2.push(E::Fr::from(e));
+        inp2.push(E::ScalarField::from(e));
     }
 
     assert_ne!(sum2, sum1);
@@ -752,17 +754,17 @@ fn difference_of_array_sum<E: PairingEngine>(
     let mut inputs = HashMap::new();
     inputs.insert("inA".to_string(), inp_a.to_vec());
     inputs.insert("inB".to_string(), inp_b.to_vec());
-    inputs.insert("min".to_string(), vec![E::Fr::from(min)]);
+    inputs.insert("min".to_string(), vec![E::ScalarField::from(min)]);
 
     set_circuit_wires(&mut circuit, wasm_file_path, inputs.clone());
     let public = prove_and_verify_circuit(circuit.clone(), &params, commit_witness_count);
 
     assert_eq!(public.len(), 2);
-    assert_eq!(public[0], E::Fr::from(1u64));
-    assert_eq!(public[1], E::Fr::from(min));
+    assert_eq!(public[0], E::ScalarField::from(1u64));
+    assert_eq!(public[1], E::ScalarField::from(min));
 }
 
-fn greater_than_or_public<E: PairingEngine>(r1cs_file_path: &str, wasm_file_path: &str) {
+fn greater_than_or_public<E: Pairing>(r1cs_file_path: &str, wasm_file_path: &str) {
     let mut circuit = CircomCircuit::<E>::from_r1cs_file(abs_path(r1cs_file_path)).unwrap();
 
     let commit_witness_count = 2;
@@ -782,63 +784,63 @@ fn greater_than_or_public<E: PairingEngine>(r1cs_file_path: &str, wasm_file_path
 
     // Both greater than checks satisfy
     let mut inputs = HashMap::new();
-    inputs.insert("in1".to_string(), vec![E::Fr::from(big1)]);
-    inputs.insert("in2".to_string(), vec![E::Fr::from(big2)]);
-    inputs.insert("in3".to_string(), vec![E::Fr::from(small1)]);
-    inputs.insert("in4".to_string(), vec![E::Fr::from(small2)]);
+    inputs.insert("in1".to_string(), vec![E::ScalarField::from(big1)]);
+    inputs.insert("in2".to_string(), vec![E::ScalarField::from(big2)]);
+    inputs.insert("in3".to_string(), vec![E::ScalarField::from(small1)]);
+    inputs.insert("in4".to_string(), vec![E::ScalarField::from(small2)]);
 
     set_circuit_wires(&mut circuit, wasm_file_path, inputs.clone());
     let public = prove_and_verify_circuit(circuit.clone(), &params, commit_witness_count);
 
     assert_eq!(public.len(), 3);
-    assert_eq!(public[0], E::Fr::from(1u64));
-    assert_eq!(public[1], E::Fr::from(small1));
-    assert_eq!(public[2], E::Fr::from(small2));
+    assert_eq!(public[0], E::ScalarField::from(1u64));
+    assert_eq!(public[1], E::ScalarField::from(small1));
+    assert_eq!(public[2], E::ScalarField::from(small2));
 
     // Only 1st greater than check satisfies
     let mut inputs = HashMap::new();
-    inputs.insert("in1".to_string(), vec![E::Fr::from(big1)]);
-    inputs.insert("in2".to_string(), vec![E::Fr::from(small2)]);
-    inputs.insert("in3".to_string(), vec![E::Fr::from(small1)]);
-    inputs.insert("in4".to_string(), vec![E::Fr::from(big2)]);
+    inputs.insert("in1".to_string(), vec![E::ScalarField::from(big1)]);
+    inputs.insert("in2".to_string(), vec![E::ScalarField::from(small2)]);
+    inputs.insert("in3".to_string(), vec![E::ScalarField::from(small1)]);
+    inputs.insert("in4".to_string(), vec![E::ScalarField::from(big2)]);
 
     set_circuit_wires(&mut circuit, wasm_file_path, inputs.clone());
     let public = prove_and_verify_circuit(circuit.clone(), &params, commit_witness_count);
 
     assert_eq!(public.len(), 3);
-    assert_eq!(public[0], E::Fr::from(1u64));
-    assert_eq!(public[1], E::Fr::from(small1));
-    assert_eq!(public[2], E::Fr::from(big2));
+    assert_eq!(public[0], E::ScalarField::from(1u64));
+    assert_eq!(public[1], E::ScalarField::from(small1));
+    assert_eq!(public[2], E::ScalarField::from(big2));
 
     // Only 2nd greater than check satisfies
     let mut inputs = HashMap::new();
-    inputs.insert("in1".to_string(), vec![E::Fr::from(small1)]);
-    inputs.insert("in2".to_string(), vec![E::Fr::from(big2)]);
-    inputs.insert("in3".to_string(), vec![E::Fr::from(big1)]);
-    inputs.insert("in4".to_string(), vec![E::Fr::from(small2)]);
+    inputs.insert("in1".to_string(), vec![E::ScalarField::from(small1)]);
+    inputs.insert("in2".to_string(), vec![E::ScalarField::from(big2)]);
+    inputs.insert("in3".to_string(), vec![E::ScalarField::from(big1)]);
+    inputs.insert("in4".to_string(), vec![E::ScalarField::from(small2)]);
 
     set_circuit_wires(&mut circuit, wasm_file_path, inputs.clone());
     let public = prove_and_verify_circuit(circuit.clone(), &params, commit_witness_count);
 
     assert_eq!(public.len(), 3);
-    assert_eq!(public[0], E::Fr::from(1u64));
-    assert_eq!(public[1], E::Fr::from(big1));
-    assert_eq!(public[2], E::Fr::from(small2));
+    assert_eq!(public[0], E::ScalarField::from(1u64));
+    assert_eq!(public[1], E::ScalarField::from(big1));
+    assert_eq!(public[2], E::ScalarField::from(small2));
 
     // Both greater than checks fail
     let mut inputs = HashMap::new();
-    inputs.insert("in1".to_string(), vec![E::Fr::from(small1)]);
-    inputs.insert("in2".to_string(), vec![E::Fr::from(small2)]);
-    inputs.insert("in3".to_string(), vec![E::Fr::from(big1)]);
-    inputs.insert("in4".to_string(), vec![E::Fr::from(big2)]);
+    inputs.insert("in1".to_string(), vec![E::ScalarField::from(small1)]);
+    inputs.insert("in2".to_string(), vec![E::ScalarField::from(small2)]);
+    inputs.insert("in3".to_string(), vec![E::ScalarField::from(big1)]);
+    inputs.insert("in4".to_string(), vec![E::ScalarField::from(big2)]);
 
     set_circuit_wires(&mut circuit, wasm_file_path, inputs.clone());
     let public = prove_and_verify_circuit(circuit.clone(), &params, commit_witness_count);
 
     assert_eq!(public.len(), 3);
-    assert_eq!(public[0], E::Fr::from(0u64));
-    assert_eq!(public[1], E::Fr::from(big1));
-    assert_eq!(public[2], E::Fr::from(big2));
+    assert_eq!(public[0], E::ScalarField::from(0u64));
+    assert_eq!(public[1], E::ScalarField::from(big1));
+    assert_eq!(public[2], E::ScalarField::from(big2));
 }
 
 #[test]
@@ -892,7 +894,7 @@ fn nconstraints_bn128() {
     nconstraints::<Bn254>(
         r1cs_file_path,
         wasm_file_path,
-        <Bn254 as PairingEngine>::Fr::rand(&mut rng),
+        <Bn254 as Pairing>::ScalarField::rand(&mut rng),
         1,
         num_constraints,
     );
@@ -907,7 +909,7 @@ fn nconstraints_bls12_381() {
     nconstraints::<Bls12_381>(
         r1cs_file_path,
         wasm_file_path,
-        <Bls12_381 as PairingEngine>::Fr::rand(&mut rng),
+        <Bls12_381 as Pairing>::ScalarField::rand(&mut rng),
         1,
         num_constraints,
     );

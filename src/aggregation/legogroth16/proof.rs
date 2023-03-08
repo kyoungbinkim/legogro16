@@ -2,19 +2,15 @@ use crate::aggregation::commitment::PairCommitment;
 use crate::aggregation::error::AggregationError;
 use crate::aggregation::kzg::KZGOpening;
 use crate::aggregation::srs;
-use ark_ec::PairingEngine;
-use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, SerializationError};
-use ark_std::{
-    io::{Read, Write},
-    string::ToString,
-    vec::Vec,
-};
+use ark_ec::pairing::{Pairing, PairingOutput};
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
+use ark_std::{string::ToString, vec::Vec};
 
 /// AggregateProof contains all elements to verify n aggregated LegoGroth16 proofs
 /// using inner pairing product arguments. This proof can be created by any
 /// party in possession of valid LegoGroth16 proofs.
 #[derive(CanonicalSerialize, CanonicalDeserialize, Debug, Clone)]
-pub struct AggregateLegoProof<E: PairingEngine> {
+pub struct AggregateLegoProof<E: Pairing> {
     /// commitment to A and B using the pair commitment scheme needed to verify
     /// TIPP relation.
     pub com_ab: PairCommitment<E>,
@@ -23,7 +19,7 @@ pub struct AggregateLegoProof<E: PairingEngine> {
     /// commit to D separate since we use it only in MIPP
     pub com_d: PairCommitment<E>,
     /// $A^r * B = Z$ is the left value on the aggregated LegoGroth16 equation
-    pub z_ab: E::Fqk,
+    pub z_ab: PairingOutput<E>,
     /// $C^r$ is used on the right side of the aggregated LegoGroth16 equation
     pub z_c: E::G1Affine,
     /// $D^r$ is used on the right side of the aggregated LegoGroth16 equation
@@ -31,7 +27,7 @@ pub struct AggregateLegoProof<E: PairingEngine> {
     pub tmipp: TippMippProofLego<E>,
 }
 
-impl<E: PairingEngine> PartialEq for AggregateLegoProof<E> {
+impl<E: Pairing> PartialEq for AggregateLegoProof<E> {
     fn eq(&self, other: &Self) -> bool {
         self.com_ab == other.com_ab
             && self.com_c == other.com_c
@@ -43,7 +39,7 @@ impl<E: PairingEngine> PartialEq for AggregateLegoProof<E> {
     }
 }
 
-impl<E: PairingEngine> AggregateLegoProof<E> {
+impl<E: Pairing> AggregateLegoProof<E> {
     /// Performs some high level checks on the length of vectors and others to
     /// make sure all items in the proofs are consistent with each other.
     pub fn parsing_check(&self) -> Result<(), AggregationError> {
@@ -81,12 +77,12 @@ impl<E: PairingEngine> AggregateLegoProof<E> {
 /// the same time. Serialization is done manually here for better inspection
 /// (CanonicalSerialization is implemented manually, not via the macro).
 #[derive(Debug, Clone, CanonicalSerialize, CanonicalDeserialize)]
-pub struct GipaProofLego<E: PairingEngine> {
+pub struct GipaProofLego<E: Pairing> {
     pub nproofs: u32,
     pub comms_ab: Vec<(PairCommitment<E>, PairCommitment<E>)>,
     pub comms_c: Vec<(PairCommitment<E>, PairCommitment<E>)>,
     pub comms_d: Vec<(PairCommitment<E>, PairCommitment<E>)>,
-    pub z_ab: Vec<(E::Fqk, E::Fqk)>,
+    pub z_ab: Vec<(PairingOutput<E>, PairingOutput<E>)>,
     pub z_c: Vec<(E::G1Affine, E::G1Affine)>,
     pub z_d: Vec<(E::G1Affine, E::G1Affine)>,
     pub final_a: E::G1Affine,
@@ -99,7 +95,7 @@ pub struct GipaProofLego<E: PairingEngine> {
     pub final_wkey: (E::G1Affine, E::G1Affine),
 }
 
-impl<E: PairingEngine> PartialEq for GipaProofLego<E> {
+impl<E: Pairing> PartialEq for GipaProofLego<E> {
     fn eq(&self, other: &Self) -> bool {
         self.nproofs == other.nproofs
             && self.comms_ab == other.comms_ab
@@ -117,7 +113,7 @@ impl<E: PairingEngine> PartialEq for GipaProofLego<E> {
     }
 }
 
-impl<E: PairingEngine> GipaProofLego<E> {
+impl<E: Pairing> GipaProofLego<E> {
     fn log_proofs(nproofs: usize) -> usize {
         (nproofs as f32).log2().ceil() as usize
     }
@@ -136,13 +132,13 @@ impl<E: PairingEngine> GipaProofLego<E> {
 /// It contains the GIPA recursive elements as well as the KZG openings for v
 /// and w
 #[derive(CanonicalSerialize, CanonicalDeserialize, Debug, Clone)]
-pub struct TippMippProofLego<E: PairingEngine> {
+pub struct TippMippProofLego<E: Pairing> {
     pub gipa: GipaProofLego<E>,
     pub vkey_opening: KZGOpening<E::G2Affine>,
     pub wkey_opening: KZGOpening<E::G1Affine>,
 }
 
-impl<E: PairingEngine> PartialEq for TippMippProofLego<E> {
+impl<E: Pairing> PartialEq for TippMippProofLego<E> {
     fn eq(&self, other: &Self) -> bool {
         self.gipa == other.gipa
             && self.vkey_opening == other.vkey_opening

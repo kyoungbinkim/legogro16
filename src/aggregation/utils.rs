@@ -1,11 +1,15 @@
-use ark_ec::{msm::VariableBaseMSM, AffineCurve, PairingEngine, ProjectiveCurve};
-use ark_ff::{Field, PrimeField};
+use ark_ec::pairing::PairingOutput;
+use ark_ec::{pairing::Pairing, AffineRepr, CurveGroup, VariableBaseMSM};
+use ark_ff::PrimeField;
 use ark_std::{
     cfg_into_iter, cfg_iter, cfg_iter_mut,
-    ops::{AddAssign, MulAssign},
+    ops::{AddAssign, Mul, MulAssign},
     string::ToString,
-    vec,
     vec::Vec,
+};
+use dock_crypto_utils::{
+    ff::{powers, sum_of_powers},
+    randomized_pairing_check::RandomizedPairingChecker,
 };
 
 use crate::aggregation::commitment::PairCommitment;
@@ -15,79 +19,34 @@ use crate::aggregation::error::AggregationError;
 use crate::aggregation::kzg::{
     prove_commitment_v, prove_commitment_w, verify_kzg_v, verify_kzg_w, KZGOpening,
 };
-use crate::aggregation::pairing_check::PairingCheck;
 use crate::aggregation::srs::VerifierSRSProjective;
+
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
-
-pub(crate) fn pairing_product<E: PairingEngine>(
-    left: &[E::G1Affine],
-    right: &[E::G2Affine],
-) -> E::Fqk {
-    let pairs: Vec<(E::G1Prepared, E::G2Prepared)> = cfg_iter!(left)
-        .map(|e| E::G1Prepared::from(*e))
-        .zip(cfg_iter!(right).map(|e| E::G2Prepared::from(*e)))
-        .collect::<Vec<_>>();
-    E::product_of_pairings(pairs.iter())
-}
-
-pub(crate) fn pairing_product_with_g2_prepared<E: PairingEngine>(
-    left: &[E::G1Affine],
-    right: Vec<E::G2Prepared>,
-) -> E::Fqk {
-    let pairs = cfg_iter!(left)
-        .map(|e| E::G1Prepared::from(*e))
-        .zip(cfg_into_iter!(right))
-        .collect::<Vec<_>>();
-    E::product_of_pairings(pairs.iter())
-}
-
-pub(crate) fn multiexponentiation_with_bigint<G: AffineCurve>(
-    left: &[G],
-    right: &[<G::ScalarField as PrimeField>::BigInt],
-) -> G::Projective {
-    VariableBaseMSM::multi_scalar_mul(left, right)
-}
-
-pub fn powers<F: Field>(num: usize, s: &F) -> Vec<F> {
-    let mut powers = vec![F::one()];
-    for i in 1..num {
-        powers.push(powers[i - 1] * s);
-    }
-    powers
-}
-
-/// SUM of a geometric progression
-/// SUM a^i = (1 - a^n) / (1 - a) = -(1-a^n)/-(1-a)
-/// = (a^n - 1) / (a - 1)
-pub fn sum_of_powers<F: Field>(num: usize, r: &F) -> F {
-    (r.pow(&[num as u64]) - &F::one()) * (*r - F::one()).inverse().unwrap()
-}
 
 /// compress is similar to commit::{V,W}KEY::compress: it modifies the `vec`
 /// vector by setting the value at index $i:0 -> split$  $vec[i] = vec[i] +
 /// vec[i+split]^scaler$. The `vec` vector is half of its size after this call.
-pub(crate) fn compress<C: AffineCurve>(vec: &mut Vec<C>, split: usize, scalar: &C::ScalarField) {
+pub(crate) fn compress<C: AffineRepr>(vec: &mut Vec<C>, split: usize, scalar: &C::ScalarField) {
+    let s_repr = scalar.into_bigint();
     let (left, right) = vec.split_at_mut(split);
     cfg_iter_mut!(left)
         .zip(cfg_iter!(right))
         .for_each(|(a_l, a_r)| {
-            let sc = scalar.clone();
-            let mut x = a_r.mul(sc);
-            x.add_assign_mixed(&a_l);
-            *a_l = x.into_affine();
+            let x = a_r.mul_bigint(s_repr);
+            *a_l = (x + *a_l).into_affine();
         });
     let len = left.len();
     vec.resize(len, C::zero());
 }
 
-pub(crate) fn inner_product_and_single_commitments<E: PairingEngine>(
+pub(crate) fn inner_product_and_single_commitments<E: Pairing>(
     c_left: &[E::G1Affine],
     c_right: &[E::G1Affine],
-    r_left_bi: &[<E::Fr as PrimeField>::BigInt],
-    r_right_bi: &[<E::Fr as PrimeField>::BigInt],
-    vk_left_prep: &PreparedVKey<E>,
-    vk_right_prep: &PreparedVKey<E>,
+    r_left_bi: &[<E::ScalarField as PrimeField>::BigInt],
+    r_right_bi: &[<E::ScalarField as PrimeField>::BigInt],
+    vk_left_prep: PreparedVKey<E>,
+    vk_right_prep: PreparedVKey<E>,
 ) -> (
     E::G1Affine,
     E::G1Affine,
@@ -95,51 +54,46 @@ pub(crate) fn inner_product_and_single_commitments<E: PairingEngine>(
     PairCommitment<E>,
 ) {
     // z_l = c[n':] ^ r[:n']
-    let zc_l = multiexponentiation_with_bigint::<E::G1Affine>(c_right, r_left_bi).into_affine();
+    let zc_l = E::G1::msm_bigint(c_right, r_left_bi).into_affine();
     // Z_r = c[:n'] ^ r[n':]
-    let zc_r = multiexponentiation_with_bigint::<E::G1Affine>(c_left, r_right_bi).into_affine();
+    let zc_r = E::G1::msm_bigint(c_left, r_right_bi).into_affine();
 
     // u_l = c[n':] * v[:n']
-    let tuc_l = PairCommitment::<E>::single_with_prepared_key(vk_left_prep, c_right).unwrap();
+    let tuc_l = PairCommitment::<E>::single(vk_left_prep, c_right).unwrap();
     // u_r = c[:n'] * v[n':]
-    let tuc_r = PairCommitment::<E>::single_with_prepared_key(vk_right_prep, c_left).unwrap();
+    let tuc_r = PairCommitment::<E>::single(vk_right_prep, c_left).unwrap();
 
     (zc_l, zc_r, tuc_l, tuc_r)
 }
 
-pub(crate) fn inner_product_and_double_commitments<E: PairingEngine>(
+pub(crate) fn inner_product_and_double_commitments<E: Pairing>(
     a_left: &[E::G1Affine],
     a_right: &[E::G1Affine],
     b_left: Vec<E::G2Prepared>,
     b_right: Vec<E::G2Prepared>,
     wk_left: &Key<E::G1Affine>,
     wk_right: &Key<E::G1Affine>,
-    vk_left_prep: &PreparedVKey<E>,
-    vk_right_prep: &PreparedVKey<E>,
-) -> (E::Fqk, E::Fqk, PairCommitment<E>, PairCommitment<E>) {
-    let tab_l = PairCommitment::<E>::double_with_prepared_key_and_message(
-        vk_left_prep,
-        wk_right,
-        &a_right,
-        b_left.clone(),
-    )
-    .unwrap();
+    vk_left_prep: PreparedVKey<E>,
+    vk_right_prep: PreparedVKey<E>,
+) -> (
+    PairingOutput<E>,
+    PairingOutput<E>,
+    PairCommitment<E>,
+    PairCommitment<E>,
+) {
+    let tab_l =
+        PairCommitment::<E>::double(vk_left_prep, wk_right, &a_right, b_left.clone()).unwrap();
 
-    let tab_r = PairCommitment::<E>::double_with_prepared_key_and_message(
-        vk_right_prep,
-        wk_left,
-        &a_left,
-        b_right.clone(),
-    )
-    .unwrap();
+    let tab_r =
+        PairCommitment::<E>::double(vk_right_prep, wk_left, &a_left, b_right.clone()).unwrap();
 
     // \prod e(A_right,B_left)
-    let zab_l = pairing_product_with_g2_prepared::<E>(&a_right, b_left);
-    let zab_r = pairing_product_with_g2_prepared::<E>(&a_left, b_right);
+    let zab_l = E::multi_pairing(a_right, b_left);
+    let zab_r = E::multi_pairing(a_left, b_right);
     (zab_l, zab_r, tab_l, tab_r)
 }
 
-pub(crate) fn aggregate_public_inputs<G: AffineCurve>(
+pub(crate) fn aggregate_public_inputs<G: AffineRepr>(
     public_inputs: &[Vec<G::ScalarField>],
     r_powers: &[G::ScalarField],
     r_sum: G::ScalarField,
@@ -167,24 +121,24 @@ pub(crate) fn aggregate_public_inputs<G: AffineCurve>(
                 ai.mul_assign(&r_powers[j]);
                 c.add_assign(&ai);
             }
-            c.into_repr()
+            c.into_bigint()
         })
         .collect::<Vec<_>>();
 
-    summed.insert(0, r_sum.into_repr());
+    summed.insert(0, r_sum.into_bigint());
 
-    VariableBaseMSM::multi_scalar_mul(&gamma_abc_g1, &summed).into_affine()
+    G::Group::msm_bigint(&gamma_abc_g1, &summed).into_affine()
 }
 
-pub(crate) fn prove_commitments<E: PairingEngine>(
+pub(crate) fn prove_commitments<E: Pairing>(
     h_alpha_powers_table: &[E::G2Affine],
     h_beta_powers_table: &[E::G2Affine],
     g_alpha_powers_table: &[E::G1Affine],
     g_beta_powers_table: &[E::G1Affine],
-    challenges: &[E::Fr],
-    challenges_inv: &[E::Fr],
-    shift: &E::Fr,
-    kzg_challenge: &E::Fr,
+    challenges: &[E::ScalarField],
+    challenges_inv: &[E::ScalarField],
+    shift: &E::ScalarField,
+    kzg_challenge: &E::ScalarField,
 ) -> Result<(KZGOpening<E::G2Affine>, KZGOpening<E::G1Affine>), AggregationError> {
     let vkey_opening = prove_commitment_v(
         h_alpha_powers_table,
@@ -202,17 +156,17 @@ pub(crate) fn prove_commitments<E: PairingEngine>(
     Ok((vkey_opening, wkey_opening))
 }
 
-pub(crate) fn verify_kzg<E: PairingEngine>(
+pub(crate) fn verify_kzg<E: Pairing>(
     v_srs: &VerifierSRSProjective<E>,
     final_vkey: &(E::G2Affine, E::G2Affine),
     vkey_opening: &KZGOpening<E::G2Affine>,
     final_wkey: &(E::G1Affine, E::G1Affine),
     wkey_opening: &KZGOpening<E::G1Affine>,
-    challenges: &[E::Fr],
-    challenges_inv: &[E::Fr],
-    shift: &E::Fr,
-    kzg_challenge: &E::Fr,
-    pairing_checker: &mut PairingCheck<E>,
+    challenges: &[E::ScalarField],
+    challenges_inv: &[E::ScalarField],
+    shift: &E::ScalarField,
+    kzg_challenge: &E::ScalarField,
+    pairing_checker: &mut RandomizedPairingChecker<E>,
 ) {
     // Verify commitment keys wellformed
     // check the opening proof for v
@@ -237,22 +191,22 @@ pub(crate) fn verify_kzg<E: PairingEngine>(
     );
 }
 
-pub(crate) fn final_verification_check<E: PairingEngine>(
-    source1: &mut Vec<E::G1Affine>,
-    source2: &mut Vec<E::G2Affine>,
+pub(crate) fn final_verification_check<E: Pairing>(
+    mut source1: Vec<E::G1Affine>,
+    mut source2: Vec<E::G2Affine>,
     z_c: E::G1Affine,
-    z_ab: &E::Fqk,
-    r: &E::Fr,
-    public_inputs: &[Vec<E::Fr>],
+    z_ab: &PairingOutput<E>,
+    r: &E::ScalarField,
+    public_inputs: &[Vec<E::ScalarField>],
     alpha_g1: &E::G1Affine,
     beta_g2: E::G2Affine,
     gamma_g2: E::G2Affine,
     delta_g2: E::G2Affine,
     gamma_abc_g1: &[E::G1Affine],
-    checker: &mut PairingCheck<E>,
+    checker: &mut RandomizedPairingChecker<E>,
 ) -> Result<(), AggregationError> {
-    let r_powers = powers(public_inputs.len(), r);
-    let r_sum = sum_of_powers::<E::Fr>(public_inputs.len(), r);
+    let r_powers = powers(r, public_inputs.len());
+    let r_sum = sum_of_powers::<E::ScalarField>(r, public_inputs.len());
 
     // Check aggregate pairing product equation
 
@@ -271,7 +225,7 @@ pub(crate) fn final_verification_check<E: PairingEngine>(
     source1.push(z_c);
     source2.push(delta_g2);
 
-    checker.add_sources_and_target(&source1, &source2, &z_ab, false);
+    checker.add_multiple_sources_and_target(&source1, source2, &z_ab);
 
     match checker.verify() {
         true => Ok(()),

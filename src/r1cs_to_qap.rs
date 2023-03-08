@@ -184,20 +184,27 @@ impl R1CStoQAP for LibsnarkReduction {
                 *c = evaluate_constraint(&matrices.c[i], &full_assignment);
             });
 
+        let coset_domain = domain.get_coset(F::GENERATOR).unwrap();
+
         let mut arr = [&mut a, &mut b, &mut c];
         cfg_iter_mut!(arr).for_each(|mut x| domain.ifft_in_place(&mut x));
-        cfg_iter_mut!(arr).for_each(|mut x| domain.coset_fft_in_place(&mut x));
+        cfg_iter_mut!(arr).for_each(|mut x| coset_domain.fft_in_place(&mut x));
 
         let mut ab = domain.mul_polynomials_in_evaluation_domain(&a, &b);
         drop(a);
         drop(b);
 
-        cfg_iter_mut!(ab)
-            .zip(c)
-            .for_each(|(ab_i, c_i)| *ab_i -= &c_i);
+        let vanishing_polynomial_over_coset = domain
+            .evaluate_vanishing_polynomial(F::GENERATOR)
+            .inverse()
+            .unwrap();
 
-        domain.divide_by_vanishing_poly_on_coset_in_place(&mut ab);
-        domain.coset_ifft_in_place(&mut ab);
+        cfg_iter_mut!(ab).zip(c).for_each(|(ab_i, c_i)| {
+            *ab_i -= &c_i;
+            *ab_i *= &vanishing_polynomial_over_coset;
+        });
+
+        coset_domain.ifft_in_place(&mut ab);
 
         Ok(ab)
     }

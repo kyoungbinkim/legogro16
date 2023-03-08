@@ -1,5 +1,5 @@
-use ark_ec::PairingEngine;
-use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, SerializationError};
+use ark_ec::pairing::Pairing;
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::{
     io::{Read, Write},
     marker::PhantomData,
@@ -10,21 +10,21 @@ pub use serialization::*;
 
 /// A linear combination
 #[derive(Clone, Debug, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
-pub struct LC<E: PairingEngine>(pub Vec<(usize, E::Fr)>);
+pub struct LC<E: Pairing>(pub Vec<(usize, E::ScalarField)>);
 
-impl<E: PairingEngine> LC<E> {
+impl<E: Pairing> LC<E> {
     pub fn len(&self) -> usize {
         self.0.len()
     }
 
-    pub fn terms(&self) -> &[(usize, E::Fr)] {
+    pub fn terms(&self) -> &[(usize, E::ScalarField)] {
         &self.0
     }
 }
 
 /// A single constraint. Comprised of 3 linear combinations as `a * b - c = 0`
 #[derive(Clone, Debug, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
-pub struct Constraint<E: PairingEngine> {
+pub struct Constraint<E: Pairing> {
     pub a: LC<E>,
     pub b: LC<E>,
     pub c: LC<E>,
@@ -45,7 +45,7 @@ impl Default for Curve {
 
 /// Result of the parsed R1CS file.
 #[derive(Clone, Debug, Default, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
-pub struct R1CS<E: PairingEngine> {
+pub struct R1CS<E: Pairing> {
     pub curve: Curve,
     /// Total number of public values in the circuit. Includes public inputs and outputs and the always
     /// present input "1".
@@ -59,7 +59,7 @@ pub struct R1CS<E: PairingEngine> {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
-pub struct R1CSFile<E: PairingEngine> {
+pub struct R1CSFile<E: Pairing> {
     /// R1CS file version. This is different from the Circom compiler version.
     pub version: u32,
     pub header: Header<E>,
@@ -69,7 +69,7 @@ pub struct R1CSFile<E: PairingEngine> {
 
 /// Header section of R1CS file
 #[derive(Clone, Debug, Default, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
-pub struct Header<E: PairingEngine> {
+pub struct Header<E: Pairing> {
     /// Size in bytes of a field element
     pub field_size: u32,
     /// Order of the largest subgroup of the curves
@@ -85,7 +85,7 @@ pub struct Header<E: PairingEngine> {
     pub phantom: PhantomData<E>,
 }
 
-impl<E: PairingEngine> From<R1CSFile<E>> for R1CS<E> {
+impl<E: Pairing> From<R1CSFile<E>> for R1CS<E> {
     fn from(file: R1CSFile<E>) -> Self {
         let num_inputs = (1 + file.header.n_pub_in + file.header.n_pub_out) as usize;
         let num_variables = file.header.n_wires as usize;
@@ -100,7 +100,7 @@ impl<E: PairingEngine> From<R1CSFile<E>> for R1CS<E> {
     }
 }
 
-impl<E: PairingEngine> R1CS<E> {
+impl<E: Pairing> R1CS<E> {
     #[cfg(feature = "std")]
     pub fn from_file(
         path: impl AsRef<std::path::Path>,
@@ -111,19 +111,32 @@ impl<E: PairingEngine> R1CS<E> {
 
 mod serialization {
     use super::*;
+    use ark_serialize::{Compress, SerializationError, Valid, Validate};
+
+    impl Valid for Curve {
+        fn check(&self) -> Result<(), SerializationError> {
+            Ok(())
+        }
+    }
 
     impl CanonicalSerialize for Curve {
-        fn serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+        fn serialize_with_mode<W: Write>(
+            &self,
+            mut writer: W,
+            compress: Compress,
+        ) -> Result<(), SerializationError> {
             match self {
-                Self::Bn128 => CanonicalSerialize::serialize(&0u8, &mut writer),
-                Self::Bls12_381 => CanonicalSerialize::serialize(&1u8, &mut writer),
+                Self::Bn128 => CanonicalSerialize::serialize_with_mode(&0u8, &mut writer, compress),
+                Self::Bls12_381 => {
+                    CanonicalSerialize::serialize_with_mode(&1u8, &mut writer, compress)
+                }
             }
         }
 
-        fn serialized_size(&self) -> usize {
+        fn serialized_size(&self, compress: Compress) -> usize {
             match self {
-                Self::Bn128 => 0u8.serialized_size(),
-                Self::Bls12_381 => 1u8.serialized_size(),
+                Self::Bn128 => 0u8.serialized_size(compress),
+                Self::Bls12_381 => 1u8.serialized_size(compress),
             }
         }
 
@@ -137,13 +150,6 @@ mod serialization {
             }
         }
 
-        fn serialize_unchecked<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
-            match self {
-                Self::Bn128 => 0u8.serialize_unchecked(&mut writer),
-                Self::Bls12_381 => 1u8.serialize_unchecked(&mut writer),
-            }
-        }
-
         fn uncompressed_size(&self) -> usize {
             match self {
                 Self::Bn128 => 0u8.uncompressed_size(),
@@ -153,25 +159,13 @@ mod serialization {
     }
 
     impl CanonicalDeserialize for Curve {
-        fn deserialize<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
+        fn deserialize_with_mode<R: Read>(
+            mut reader: R,
+            compress: Compress,
+            validate: Validate,
+        ) -> Result<Self, SerializationError> {
             // let t: u8 = CanonicalDeserialize::deserialize(&mut reader)?;
-            match u8::deserialize(&mut reader)? {
-                0u8 => Ok(Curve::Bn128),
-                1u8 => Ok(Curve::Bls12_381),
-                _ => Err(SerializationError::InvalidData),
-            }
-        }
-
-        fn deserialize_uncompressed<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
-            match u8::deserialize_uncompressed(&mut reader)? {
-                0u8 => Ok(Curve::Bn128),
-                1u8 => Ok(Curve::Bls12_381),
-                _ => Err(SerializationError::InvalidData),
-            }
-        }
-
-        fn deserialize_unchecked<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
-            match u8::deserialize_unchecked(&mut reader)? {
+            match u8::deserialize_with_mode(&mut reader, compress, validate)? {
                 0u8 => Ok(Curve::Bn128),
                 1u8 => Ok(Curve::Bls12_381),
                 _ => Err(SerializationError::InvalidData),

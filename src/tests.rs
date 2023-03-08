@@ -4,7 +4,7 @@ use crate::{
     rerandomize_proof_1, verify_proof, verify_proof_incl_cp_link, verify_witness_commitment,
     LinkPublicGenerators,
 };
-use ark_ec::{PairingEngine, ProjectiveCurve};
+use ark_ec::{pairing::Pairing, CurveGroup};
 use ark_ff::Field;
 use ark_std::{
     rand::{rngs::StdRng, RngCore, SeedableRng},
@@ -131,15 +131,15 @@ impl<ConstraintF: Field> ConstraintSynthesizer<ConstraintF> for MyLessSillyCircu
     }
 }
 
-pub fn get_link_public_gens<R: RngCore, E: PairingEngine>(
+pub fn get_link_public_gens<R: RngCore, E: Pairing>(
     rng: &mut R,
     count: usize,
 ) -> LinkPublicGenerators<E> {
     let pedersen_gens = (0..count)
-        .map(|_| E::G1Projective::rand(rng).into_affine())
+        .map(|_| E::G1::rand(rng).into_affine())
         .collect::<Vec<_>>();
-    let g1 = E::G1Projective::rand(rng).into_affine();
-    let g2 = E::G2Projective::rand(rng).into_affine();
+    let g1 = E::G1::rand(rng).into_affine();
+    let g2 = E::G2::rand(rng).into_affine();
     LinkPublicGenerators {
         pedersen_gens,
         g1,
@@ -149,9 +149,9 @@ pub fn get_link_public_gens<R: RngCore, E: PairingEngine>(
 
 fn test_prove_and_verify<E>(n_iters: usize)
 where
-    E: PairingEngine,
+    E: Pairing,
 {
-    fn run<E: PairingEngine>(n_iters: usize, commit_witness_count: usize) {
+    fn run<E: Pairing>(n_iters: usize, commit_witness_count: usize) {
         let mut rng = StdRng::seed_from_u64(0u64);
         let circuit = MySillyCircuit { a: None, b: None };
 
@@ -193,15 +193,15 @@ where
         let pvk = prepare_verifying_key::<E>(&params.vk);
 
         for _ in 0..n_iters {
-            let a = E::Fr::rand(&mut rng);
-            let b = E::Fr::rand(&mut rng);
+            let a = E::ScalarField::rand(&mut rng);
+            let b = E::ScalarField::rand(&mut rng);
             let mut c = a;
             c.mul_assign(&b);
 
             // Randomness for the committed witness in proof.d
-            let v = E::Fr::rand(&mut rng);
+            let v = E::ScalarField::rand(&mut rng);
             // Randomness for the committed witness in CP_link
-            let link_v = E::Fr::rand(&mut rng);
+            let link_v = E::ScalarField::rand(&mut rng);
 
             let circuit = MySillyCircuit {
                 a: Some(a),
@@ -277,7 +277,7 @@ where
                 assert!(verify_witness_commitment(&params.vk, &re_rand_proof, 1, &[], &v).is_err());
             }
 
-            let new_v = E::Fr::rand(&mut rng);
+            let new_v = E::ScalarField::rand(&mut rng);
             let re_rand_proof_1 = rerandomize_proof_1(
                 &proof,
                 v,
@@ -356,7 +356,7 @@ where
 
 fn test_prove_and_verify_1<E>(n_iters: usize)
 where
-    E: PairingEngine,
+    E: Pairing,
 {
     let mut rng = StdRng::seed_from_u64(0u64);
 
@@ -389,10 +389,10 @@ where
     let pvk = prepare_verifying_key::<E>(&params.vk);
 
     for _ in 0..n_iters {
-        let a = E::Fr::rand(&mut rng);
-        let b = E::Fr::rand(&mut rng);
-        let c = E::Fr::rand(&mut rng);
-        let d = E::Fr::rand(&mut rng);
+        let a = E::ScalarField::rand(&mut rng);
+        let b = E::ScalarField::rand(&mut rng);
+        let c = E::ScalarField::rand(&mut rng);
+        let d = E::ScalarField::rand(&mut rng);
 
         let e = a * b;
 
@@ -401,9 +401,9 @@ where
         let y = e + f;
 
         // Randomness for the committed witness in proof.d
-        let v = E::Fr::rand(&mut rng);
+        let v = E::ScalarField::rand(&mut rng);
         // Randomness for the committed witness in CP_link
-        let link_v = E::Fr::rand(&mut rng);
+        let link_v = E::ScalarField::rand(&mut rng);
 
         // Create a LegoGro16 proof with our parameters.
         let circuit = MyLessSillyCircuit {
@@ -446,7 +446,7 @@ where
         let re_rand_proof = rerandomize_proof(&proof, &params.vk, &mut rng);
         verify_proof(&pvk, &re_rand_proof, &[y]).unwrap();
 
-        let new_v = E::Fr::rand(&mut rng);
+        let new_v = E::ScalarField::rand(&mut rng);
         let re_rand_proof_1 = rerandomize_proof_1(
             &proof,
             v,
@@ -462,7 +462,7 @@ where
 
 fn test_prove_and_verify_2<E>(n_iters: usize)
 where
-    E: PairingEngine,
+    E: Pairing,
 {
     let mut rng = StdRng::seed_from_u64(0u64);
 
@@ -495,10 +495,10 @@ where
     let pvk = prepare_verifying_key::<E>(&params.vk);
 
     for _ in 0..n_iters {
-        let a = E::Fr::rand(&mut rng);
-        let b = E::Fr::rand(&mut rng);
-        let c = E::Fr::rand(&mut rng);
-        let d = E::Fr::rand(&mut rng);
+        let a = E::ScalarField::rand(&mut rng);
+        let b = E::ScalarField::rand(&mut rng);
+        let c = E::ScalarField::rand(&mut rng);
+        let d = E::ScalarField::rand(&mut rng);
 
         let mut e = a;
         e.mul_assign(&b);
@@ -507,9 +507,9 @@ where
         f.mul_assign(&d);
 
         // Randomness for the committed witness in proof.d
-        let v = E::Fr::rand(&mut rng);
+        let v = E::ScalarField::rand(&mut rng);
         // Randomness for the committed witness in CP_link
-        let link_v = E::Fr::rand(&mut rng);
+        let link_v = E::ScalarField::rand(&mut rng);
 
         // Create a LegoGro16 proof with our parameters.
         let circuit = MyLessSillyCircuit1 {
@@ -552,7 +552,7 @@ where
         let re_rand_proof = rerandomize_proof(&proof, &params.vk, &mut rng);
         verify_proof(&pvk, &re_rand_proof, &[e, f]).unwrap();
 
-        let new_v = E::Fr::rand(&mut rng);
+        let new_v = E::ScalarField::rand(&mut rng);
         let re_rand_proof_1 = rerandomize_proof_1(
             &proof,
             v,

@@ -1,7 +1,7 @@
 use crate::{Groth16, PreparedVerifyingKey, Proof, VerifyingKey};
 use ark_crypto_primitives::snark::constraints::{CircuitSpecificSetupSNARKGadget, SNARKGadget};
 use ark_crypto_primitives::snark::{BooleanInputVar, SNARK};
-use ark_ec::{AffineCurve, PairingEngine};
+use ark_ec::{AffineRepr, PairingEngine};
 use ark_r1cs_std::groups::CurveVar;
 use ark_r1cs_std::{
     alloc::{AllocVar, AllocationMode},
@@ -91,18 +91,18 @@ where
     _pairing_gadget: PhantomData<P>,
 }
 
-impl<E: PairingEngine, P: PairingVar<E, E::Fq>> SNARKGadget<E::Fr, E::Fq, Groth16<E>>
+impl<E: PairingEngine, P: PairingVar<E, E::Fq>> SNARKGadget<E::ScalarField, E::Fq, Groth16<E>>
     for Groth16VerifierGadget<E, P>
 {
     type ProcessedVerifyingKeyVar = PreparedVerifyingKeyVar<E, P>;
     type VerifyingKeyVar = VerifyingKeyVar<E, P>;
-    type InputVar = BooleanInputVar<E::Fr, E::Fq>;
+    type InputVar = BooleanInputVar<E::ScalarField, E::Fq>;
     type ProofVar = ProofVar<E, P>;
 
     type VerifierSize = usize;
 
     fn verifier_size(
-        circuit_vk: &<Groth16<E> as SNARK<E::Fr>>::VerifyingKey,
+        circuit_vk: &<Groth16<E> as SNARK<E::ScalarField>>::VerifyingKey,
     ) -> Self::VerifierSize {
         circuit_vk.gamma_abc_g1.len()
     }
@@ -121,17 +121,17 @@ impl<E: PairingEngine, P: PairingVar<E, E::Fq>> SNARKGadget<E::Fr, E::Fq, Groth1
             let proof = proof.borrow();
             let a = CurveVar::new_variable_omit_prime_order_check(
                 ark_relations::ns!(cs, "Proof.a"),
-                || Ok(proof.a.into_projective()),
+                || Ok(proof.a.into_group()),
                 mode,
             )?;
             let b = CurveVar::new_variable_omit_prime_order_check(
                 ark_relations::ns!(cs, "Proof.b"),
-                || Ok(proof.b.into_projective()),
+                || Ok(proof.b.into_group()),
                 mode,
             )?;
             let c = CurveVar::new_variable_omit_prime_order_check(
                 ark_relations::ns!(cs, "Proof.c"),
-                || Ok(proof.c.into_projective()),
+                || Ok(proof.c.into_group()),
                 mode,
             )?;
             Ok(ProofVar { a, b, c })
@@ -152,22 +152,22 @@ impl<E: PairingEngine, P: PairingVar<E, E::Fq>> SNARKGadget<E::Fr, E::Fq, Groth1
             let vk = vk.borrow();
             let alpha_g1 = P::G1Var::new_variable_omit_prime_order_check(
                 ark_relations::ns!(cs, "alpha_g1"),
-                || Ok(vk.alpha_g1.into_projective()),
+                || Ok(vk.alpha_g1.into_group()),
                 mode,
             )?;
             let beta_g2 = P::G2Var::new_variable_omit_prime_order_check(
                 ark_relations::ns!(cs, "beta_g2"),
-                || Ok(vk.beta_g2.into_projective()),
+                || Ok(vk.beta_g2.into_group()),
                 mode,
             )?;
             let gamma_g2 = P::G2Var::new_variable_omit_prime_order_check(
                 ark_relations::ns!(cs, "gamma_g2"),
-                || Ok(vk.gamma_g2.into_projective()),
+                || Ok(vk.gamma_g2.into_group()),
                 mode,
             )?;
             let delta_g2 = P::G2Var::new_variable_omit_prime_order_check(
                 ark_relations::ns!(cs, "delta_g2"),
-                || Ok(vk.delta_g2.into_projective()),
+                || Ok(vk.delta_g2.into_group()),
                 mode,
             )?;
             let gamma_abc_g1 = vk
@@ -176,7 +176,7 @@ impl<E: PairingEngine, P: PairingVar<E, E::Fq>> SNARKGadget<E::Fr, E::Fq, Groth1
                 .map(|g| {
                     P::G1Var::new_variable_omit_prime_order_check(
                         ark_relations::ns!(cs, "gamma_abc_g1"),
-                        || Ok(g.into_projective()),
+                        || Ok(g.into_group()),
                         mode,
                     )
                 })
@@ -250,7 +250,7 @@ impl<E: PairingEngine, P: PairingVar<E, E::Fq>> SNARKGadget<E::Fr, E::Fq, Groth1
     }
 }
 
-impl<E, P> CircuitSpecificSetupSNARKGadget<E::Fr, E::Fq, Groth16<E>> for Groth16VerifierGadget<E, P>
+impl<E, P> CircuitSpecificSetupSNARKGadget<E::ScalarField, E::Fq, Groth16<E>> for Groth16VerifierGadget<E, P>
 where
     E: PairingEngine,
     P: PairingVar<E, E::Fq>,
@@ -399,7 +399,7 @@ mod test {
     use crate::{constraints::Groth16VerifierGadget, Groth16};
     use ark_crypto_primitives::snark::constraints::SNARKGadget;
     use ark_crypto_primitives::snark::{CircuitSpecificSetupSNARK, SNARK};
-    use ark_ec::PairingEngine;
+    use ark_ec::pairing::Pairing;
     use ark_ff::{Field, UniformRand};
     use ark_mnt4_298::{
         constraints::PairingVar as MNT4PairingVar, Fr as MNT4Fr, MNT4_298 as MNT4PairingEngine,

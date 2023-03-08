@@ -9,7 +9,7 @@ pub use utils::*;
 mod test {
     use super::{PESubspaceSnark, SparseMatrix, SubspaceSnark, PP};
     use ark_bls12_381::{Bls12_381, Fr, G1Affine, G1Projective, G2Affine, G2Projective};
-    use ark_ec::{AffineCurve, ProjectiveCurve};
+    use ark_ec::{AffineRepr, CurveGroup, Group};
     use ark_ff::{One, PrimeField, UniformRand, Zero};
     use ark_std::rand::{rngs::StdRng, SeedableRng};
     use std::ops::Add;
@@ -65,9 +65,9 @@ mod test {
 
         // y is a Pedersen-like commitment to `two` and `three` and bases `h1` and `h2`, i.e `y = h1 * two + h2 * three`
         let y: Vec<G1Affine> = vec![h1
-            .into_projective()
-            .mul(two.into_repr())
-            .add(h2.into_projective().mul(three.into_repr()))
+            .into_group()
+            .mul_bigint(two.into_bigint())
+            .add(h2.into_group().mul_bigint(three.into_bigint()))
             .into_affine()];
 
         let (ek, vk) = PESubspaceSnark::<Bls12_381>::keygen(&mut rng, &pp, &m).unwrap();
@@ -106,8 +106,10 @@ mod test {
         let w: Vec<Fr> = vec![Fr::rand(&mut rng), Fr::rand(&mut rng), Fr::rand(&mut rng)];
 
         let x: Vec<G1Affine> = vec![
-            bases1[0].into_projective().mul(w[0].into_repr()) + bases1[1].mul(w[2].into_repr()),
-            bases2[0].into_projective().mul(w[1].into_repr()) + bases2[1].mul(w[2].into_repr()),
+            bases1[0].into_group().mul_bigint(w[0].into_bigint())
+                + bases1[1].mul_bigint(w[2].into_bigint()),
+            bases2[0].into_group().mul_bigint(w[1].into_bigint())
+                + bases2[1].mul_bigint(w[2].into_bigint()),
         ]
         .into_iter()
         .map(|p| p.into_affine())
@@ -162,12 +164,12 @@ mod test {
         ];
 
         let x: Vec<G1Affine> = vec![
-            bases1[0].into_projective().mul(w[0].into_repr())
-                + bases1[1].mul(w[1].into_repr())
-                + bases1[2].mul(w[2].into_repr()),
-            bases2[0].into_projective().mul(w[0].into_repr())
-                + bases2[1].mul(w[1].into_repr())
-                + bases2[2].mul(w[3].into_repr()),
+            bases1[0].into_group().mul_bigint(w[0].into_bigint())
+                + bases1[1].mul_bigint(w[1].into_bigint())
+                + bases1[2].mul_bigint(w[2].into_bigint()),
+            bases2[0].into_group().mul_bigint(w[0].into_bigint())
+                + bases2[1].mul_bigint(w[1].into_bigint())
+                + bases2[2].mul_bigint(w[3].into_bigint()),
         ]
         .into_iter()
         .map(|p| p.into_affine())

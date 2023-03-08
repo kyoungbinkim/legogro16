@@ -4,19 +4,26 @@ use crate::{
     Proof, ProofWithLink, ProvingKey, ProvingKeyCommon, ProvingKeyWithLink, VerifyingKey,
     VerifyingKeyWithLink,
 };
-use ark_ec::msm::FixedBaseMSM;
-use ark_ec::{msm::VariableBaseMSM, AffineCurve, PairingEngine, ProjectiveCurve};
+use ark_ec::{
+    pairing::Pairing, scalar_mul::fixed_base::FixedBase, AffineRepr, CurveGroup, Group,
+    VariableBaseMSM,
+};
 use ark_ff::{Field, PrimeField, UniformRand, Zero};
 use ark_poly::GeneralEvaluationDomain;
 use ark_relations::r1cs::{
     ConstraintSynthesizer, ConstraintSystem, ConstraintSystemRef, OptimizationGoal, SynthesisError,
 };
 use ark_std::rand::Rng;
-use ark_std::{cfg_into_iter, cfg_iter, end_timer, start_timer, vec, vec::Vec};
+use ark_std::{
+    cfg_into_iter, cfg_iter, end_timer,
+    ops::{AddAssign, Mul},
+    start_timer, vec,
+    vec::Vec,
+};
 
 use crate::error::Error;
 use crate::r1cs_to_qap::R1CStoQAP;
-use ark_std::ops::AddAssign;
+
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
@@ -25,18 +32,18 @@ use rayon::prelude::*;
 #[inline]
 pub fn create_random_proof_incl_cp_link<E, C, R>(
     circuit: C,
-    v: E::Fr,
-    link_v: E::Fr,
+    v: E::ScalarField,
+    link_v: E::ScalarField,
     pk: &ProvingKeyWithLink<E>,
     rng: &mut R,
 ) -> crate::Result<ProofWithLink<E>>
 where
-    E: PairingEngine,
-    C: ConstraintSynthesizer<E::Fr>,
+    E: Pairing,
+    C: ConstraintSynthesizer<E::ScalarField>,
     R: Rng,
 {
-    let r = E::Fr::rand(rng);
-    let s = E::Fr::rand(rng);
+    let r = E::ScalarField::rand(rng);
+    let s = E::ScalarField::rand(rng);
 
     create_proof_incl_cp_link::<E, C>(circuit, pk, r, s, v, link_v)
 }
@@ -46,17 +53,17 @@ where
 #[inline]
 pub fn create_random_proof<E, C, R>(
     circuit: C,
-    v: E::Fr,
+    v: E::ScalarField,
     pk: &ProvingKey<E>,
     rng: &mut R,
 ) -> crate::Result<Proof<E>>
 where
-    E: PairingEngine,
-    C: ConstraintSynthesizer<E::Fr>,
+    E: Pairing,
+    C: ConstraintSynthesizer<E::ScalarField>,
     R: Rng,
 {
-    let r = E::Fr::rand(rng);
-    let s = E::Fr::rand(rng);
+    let r = E::ScalarField::rand(rng);
+    let s = E::ScalarField::rand(rng);
 
     create_proof::<E, C>(circuit, pk, r, s, v)
 }
@@ -67,14 +74,14 @@ where
 pub fn create_proof_incl_cp_link<E, C>(
     circuit: C,
     pk: &ProvingKeyWithLink<E>,
-    r: E::Fr,
-    s: E::Fr,
-    v: E::Fr,
-    link_v: E::Fr,
+    r: E::ScalarField,
+    s: E::ScalarField,
+    v: E::ScalarField,
+    link_v: E::ScalarField,
 ) -> crate::Result<ProofWithLink<E>>
 where
-    E: PairingEngine,
-    C: ConstraintSynthesizer<E::Fr>,
+    E: Pairing,
+    C: ConstraintSynthesizer<E::ScalarField>,
 {
     create_proof_incl_cp_link_with_reduction::<E, C, LibsnarkReduction>(
         circuit, pk, r, s, v, link_v,
@@ -87,13 +94,13 @@ where
 pub fn create_proof<E, C>(
     circuit: C,
     pk: &ProvingKey<E>,
-    r: E::Fr,
-    s: E::Fr,
-    v: E::Fr,
+    r: E::ScalarField,
+    s: E::ScalarField,
+    v: E::ScalarField,
 ) -> crate::Result<Proof<E>>
 where
-    E: PairingEngine,
-    C: ConstraintSynthesizer<E::Fr>,
+    E: Pairing,
+    C: ConstraintSynthesizer<E::ScalarField>,
 {
     create_proof_with_reduction::<E, C, LibsnarkReduction>(circuit, pk, r, s, v)
 }
@@ -104,14 +111,14 @@ where
 pub fn create_proof_incl_cp_link_with_reduction<E, C, QAP>(
     circuit: C,
     pk: &ProvingKeyWithLink<E>,
-    r: E::Fr,
-    s: E::Fr,
-    v: E::Fr,
-    link_v: E::Fr,
+    r: E::ScalarField,
+    s: E::ScalarField,
+    v: E::ScalarField,
+    link_v: E::ScalarField,
 ) -> crate::Result<ProofWithLink<E>>
 where
-    E: PairingEngine,
-    C: ConstraintSynthesizer<E::Fr>,
+    E: Pairing,
+    C: ConstraintSynthesizer<E::ScalarField>,
     QAP: R1CStoQAP,
 {
     let prover_time = start_timer!(|| "Groth16::Prover");
@@ -143,13 +150,13 @@ where
 pub fn create_proof_with_reduction<E, C, QAP>(
     circuit: C,
     pk: &ProvingKey<E>,
-    r: E::Fr,
-    s: E::Fr,
-    v: E::Fr,
+    r: E::ScalarField,
+    s: E::ScalarField,
+    v: E::ScalarField,
 ) -> crate::Result<Proof<E>>
 where
-    E: PairingEngine,
-    C: ConstraintSynthesizer<E::Fr>,
+    E: Pairing,
+    C: ConstraintSynthesizer<E::ScalarField>,
     QAP: R1CStoQAP,
 {
     let prover_time = start_timer!(|| "Groth16::Prover");
@@ -178,16 +185,16 @@ where
 #[inline]
 fn create_proof_incl_cp_link_with_assignment<E, QAP>(
     pk: &ProvingKeyWithLink<E>,
-    r: E::Fr,
-    s: E::Fr,
-    v: E::Fr,
-    link_v: E::Fr,
-    h: &[E::Fr],
-    input_assignment: &[E::Fr],
-    witness_assignment: &[E::Fr],
+    r: E::ScalarField,
+    s: E::ScalarField,
+    v: E::ScalarField,
+    link_v: E::ScalarField,
+    h: &[E::ScalarField],
+    input_assignment: &[E::ScalarField],
+    witness_assignment: &[E::ScalarField],
 ) -> crate::Result<ProofWithLink<E>>
 where
-    E: PairingEngine,
+    E: Pairing,
     QAP: R1CStoQAP,
 {
     let (proof, comm_wits) = create_proof_and_committed_witnesses_with_assignment::<E, QAP>(
@@ -202,11 +209,11 @@ where
     )?;
 
     let mut comm_wits_with_link_hider = cfg_iter!(comm_wits)
-        .map(|w| w.into_repr())
+        .map(|w| w.into_bigint())
         .collect::<Vec<_>>();
-    comm_wits_with_link_hider.push(link_v.into_repr());
+    comm_wits_with_link_hider.push(link_v.into_bigint());
 
-    let g_d_link = VariableBaseMSM::multi_scalar_mul(&pk.vk.link_bases, &comm_wits_with_link_hider);
+    let g_d_link = E::G1::msm_bigint(&pk.vk.link_bases, &comm_wits_with_link_hider);
 
     let mut ss_snark_witness = comm_wits;
     ss_snark_witness.push(link_v);
@@ -231,15 +238,15 @@ where
 #[inline]
 fn create_proof_with_assignment<E, QAP>(
     pk: &ProvingKey<E>,
-    r: E::Fr,
-    s: E::Fr,
-    v: E::Fr,
-    h: &[E::Fr],
-    input_assignment: &[E::Fr],
-    witness_assignment: &[E::Fr],
+    r: E::ScalarField,
+    s: E::ScalarField,
+    v: E::ScalarField,
+    h: &[E::ScalarField],
+    input_assignment: &[E::ScalarField],
+    witness_assignment: &[E::ScalarField],
 ) -> crate::Result<Proof<E>>
 where
-    E: PairingEngine,
+    E: Pairing,
     QAP: R1CStoQAP,
 {
     let (proof, _comm_wits) = create_proof_and_committed_witnesses_with_assignment::<E, QAP>(
@@ -261,50 +268,53 @@ where
 fn create_proof_and_committed_witnesses_with_assignment<E, QAP>(
     pk_common: &ProvingKeyCommon<E>,
     vk: &VerifyingKey<E>,
-    r: E::Fr,
-    s: E::Fr,
-    v: E::Fr,
-    h: &[E::Fr],
-    input_assignment: &[E::Fr],
-    witness_assignment: &[E::Fr],
-) -> crate::Result<(Proof<E>, Vec<E::Fr>)>
+    r: E::ScalarField,
+    s: E::ScalarField,
+    v: E::ScalarField,
+    h: &[E::ScalarField],
+    input_assignment: &[E::ScalarField],
+    witness_assignment: &[E::ScalarField],
+) -> crate::Result<(Proof<E>, Vec<E::ScalarField>)>
 where
-    E: PairingEngine,
+    E: Pairing,
     QAP: R1CStoQAP,
 {
-    let h_assignment = cfg_into_iter!(h).map(|s| s.into_repr()).collect::<Vec<_>>();
+    let h_assignment = cfg_into_iter!(h)
+        .map(|s| s.into_bigint())
+        .collect::<Vec<_>>();
     let c_acc_time = start_timer!(|| "Compute C");
 
-    let h_acc = VariableBaseMSM::multi_scalar_mul(&pk_common.h_query, &h_assignment);
+    let h_acc = E::G1::msm_bigint(&pk_common.h_query, &h_assignment);
     drop(h_assignment);
 
-    let v_repr = v.into_repr();
+    let v_repr = v.into_bigint();
 
     // Compute C
     let aux_assignment = cfg_iter!(witness_assignment)
-        .map(|s| s.into_repr())
+        .map(|s| s.into_bigint())
         .collect::<Vec<_>>();
 
     let committed_witnesses = &aux_assignment[..vk.commit_witness_count];
     let uncommitted_witnesses = &aux_assignment[vk.commit_witness_count..];
 
-    let l_aux_acc = VariableBaseMSM::multi_scalar_mul(&pk_common.l_query, uncommitted_witnesses);
+    let l_aux_acc = E::G1::msm_bigint(&pk_common.l_query, uncommitted_witnesses);
 
-    let v_eta_delta_inv = pk_common.eta_delta_inv_g1.into_projective().mul(v_repr);
+    let v_eta_delta_inv = pk_common.eta_delta_inv_g1.mul_bigint(v_repr);
 
     end_timer!(c_acc_time);
 
-    let s_repr = s.into_repr();
-    let delta_g1_proj = pk_common.delta_g1.into_projective();
+    let s_repr = s.into_bigint();
+    let delta_g1_proj = pk_common.delta_g1.into_group();
 
     // There will be multiple multiplications with delta_g1_proj so creating a table
-    let window_size = 3; // 3 because number of multiplications is < 32, see `FixedBaseMSM::get_mul_window_size`
-    let scalar_size = <<E as PairingEngine>::G1Affine as AffineCurve>::ScalarField::size_in_bits();
+    let window_size = 3; // 3 because number of multiplications is < 32, see `FixedBase::get_mul_window_size`
+    let scalar_size =
+        <<E as Pairing>::G1Affine as AffineRepr>::ScalarField::MODULUS_BIT_SIZE as usize;
     let outerc = (scalar_size + window_size - 1) / window_size;
-    let delta_g1_table = FixedBaseMSM::get_window_table(scalar_size, window_size, delta_g1_proj);
+    let delta_g1_table = FixedBase::get_window_table(scalar_size, window_size, delta_g1_proj);
 
     let input_assignment_wth_one = cfg_iter!(input_assignment)
-        .map(|s| s.into_repr())
+        .map(|s| s.into_bigint())
         .collect::<Vec<_>>();
 
     let mut assignment = vec![];
@@ -313,34 +323,34 @@ where
 
     // Compute A
     let a_acc_time = start_timer!(|| "Compute A");
-    let r_g1 = FixedBaseMSM::windowed_mul(outerc, window_size, &delta_g1_table, &r);
+    let r_g1 = FixedBase::windowed_mul(outerc, window_size, &delta_g1_table, &r);
     let g_a = calculate_coeff(r_g1, &pk_common.a_query, vk.alpha_g1, &assignment);
     end_timer!(a_acc_time);
 
     // Compute B in G1 if needed
     let g1_b = if !r.is_zero() {
         let b_g1_acc_time = start_timer!(|| "Compute B in G1");
-        let s_g1 = FixedBaseMSM::windowed_mul(outerc, window_size, &delta_g1_table, &s);
+        let s_g1 = FixedBase::windowed_mul(outerc, window_size, &delta_g1_table, &s);
         let g1_b = calculate_coeff(s_g1, &pk_common.b_g1_query, pk_common.beta_g1, &assignment);
         end_timer!(b_g1_acc_time);
 
         g1_b
     } else {
-        E::G1Projective::zero()
+        E::G1::zero()
     };
 
     // Compute B in G2
     let b_g2_acc_time = start_timer!(|| "Compute B in G2");
-    let s_g2 = vk.delta_g2.into_projective().mul(s_repr);
+    let s_g2 = vk.delta_g2.into_group().mul_bigint(s_repr);
     let g2_b = calculate_coeff(s_g2, &pk_common.b_g2_query, vk.beta_g2, &assignment);
     drop(assignment);
 
     end_timer!(b_g2_acc_time);
 
     let c_time = start_timer!(|| "Finish C");
-    let mut g_c = g_a.mul(s_repr);
-    g_c += &g1_b.mul(r.into_repr());
-    g_c -= &FixedBaseMSM::windowed_mul(outerc, window_size, &delta_g1_table, &(r * s));
+    let mut g_c = g_a.mul_bigint(s_repr);
+    g_c += &g1_b.mul_bigint(r.into_bigint());
+    g_c -= &FixedBase::windowed_mul::<E::G1>(outerc, window_size, &delta_g1_table, &(r * s));
     g_c += &l_aux_acc;
     g_c += &h_acc;
     g_c -= &v_eta_delta_inv;
@@ -351,10 +361,9 @@ where
 
     let gamma_abc_inputs_source = &vk.gamma_abc_g1[input_assignment_wth_one.len()
         ..input_assignment_wth_one.len() + committed_witnesses.len()];
-    let gamma_abc_inputs_acc =
-        VariableBaseMSM::multi_scalar_mul(gamma_abc_inputs_source, &committed_witnesses);
+    let gamma_abc_inputs_acc = E::G1::msm_bigint(gamma_abc_inputs_source, &committed_witnesses);
 
-    let v_eta_gamma_inv = vk.eta_gamma_inv_g1.into_projective().mul(v_repr);
+    let v_eta_gamma_inv = vk.eta_gamma_inv_g1.into_group().mul_bigint(v_repr);
 
     let mut g_d = gamma_abc_inputs_acc;
     g_d += &v_eta_gamma_inv;
@@ -375,11 +384,11 @@ where
 }
 
 /// Check the opening of cp_link.
-pub fn verify_link_commitment<E: PairingEngine>(
+pub fn verify_link_commitment<E: Pairing>(
     cp_link_bases: &[E::G1Affine],
     link_d: &E::G1Affine,
-    witnesses_expected_in_commitment: &[E::Fr],
-    link_v: &E::Fr,
+    witnesses_expected_in_commitment: &[E::ScalarField],
+    link_v: &E::ScalarField,
 ) -> crate::Result<()> {
     // Some witnesses are committed in `link_d` with randomness `link_v`
     if (witnesses_expected_in_commitment.len() + 1) > cp_link_bases.len() {
@@ -389,11 +398,11 @@ pub fn verify_link_commitment<E: PairingEngine>(
         ));
     }
     let mut committed = cfg_iter!(witnesses_expected_in_commitment)
-        .map(|p| p.into_repr())
+        .map(|p| p.into_bigint())
         .collect::<Vec<_>>();
-    committed.push(link_v.into_repr());
+    committed.push(link_v.into_bigint());
 
-    if *link_d != VariableBaseMSM::multi_scalar_mul(cp_link_bases, &committed).into_affine() {
+    if *link_d != E::G1::msm_bigint(cp_link_bases, &committed).into_affine() {
         return Err(Error::InvalidLinkCommitment);
     }
     Ok(())
@@ -402,13 +411,13 @@ pub fn verify_link_commitment<E: PairingEngine>(
 /// Check that the commitments in the proof open to the public inputs and the witnesses but with different
 /// bases and randomness. This function is only called by the prover, the verifier does not
 /// know `witnesses_expected_in_commitment` or `link_v`.
-pub fn verify_commitments<E: PairingEngine>(
+pub fn verify_commitments<E: Pairing>(
     vk: &VerifyingKeyWithLink<E>,
     proof: &ProofWithLink<E>,
     public_inputs_count: usize,
-    witnesses_expected_in_commitment: &[E::Fr],
-    v: &E::Fr,
-    link_v: &E::Fr,
+    witnesses_expected_in_commitment: &[E::ScalarField],
+    v: &E::ScalarField,
+    link_v: &E::ScalarField,
 ) -> crate::Result<()> {
     verify_link_commitment::<E>(
         &vk.link_bases,
@@ -426,12 +435,12 @@ pub fn verify_commitments<E: PairingEngine>(
 }
 
 /// Given the proof, verify that the commitment in it (`proof.d`) commits to the witness.
-pub fn verify_witness_commitment<E: PairingEngine>(
+pub fn verify_witness_commitment<E: Pairing>(
     vk: &VerifyingKey<E>,
     proof: &Proof<E>,
     public_inputs_count: usize,
-    witnesses_expected_in_commitment: &[E::Fr],
-    v: &E::Fr,
+    witnesses_expected_in_commitment: &[E::ScalarField],
+    v: &E::ScalarField,
 ) -> crate::Result<()> {
     // Some witnesses are also committed in `proof.d` with randomness `v`
     if (public_inputs_count + witnesses_expected_in_commitment.len() + 1) > vk.gamma_abc_g1.len() {
@@ -441,15 +450,15 @@ pub fn verify_witness_commitment<E: PairingEngine>(
         ));
     }
     let committed = cfg_iter!(witnesses_expected_in_commitment)
-        .map(|p| p.into_repr())
+        .map(|p| p.into_bigint())
         .collect::<Vec<_>>();
 
     // Check that proof.d is correctly constructed.
-    let mut d = VariableBaseMSM::multi_scalar_mul(
+    let mut d = E::G1::msm_bigint(
         &vk.gamma_abc_g1[1 + public_inputs_count..1 + public_inputs_count + committed.len()],
         &committed,
     );
-    d.add_assign(&vk.eta_gamma_inv_g1.mul(v.into_repr()));
+    d.add_assign(&vk.eta_gamma_inv_g1.mul_bigint(v.into_bigint()));
 
     if proof.d != d.into_affine() {
         return Err(Error::InvalidWitnessCommitment);
@@ -469,14 +478,14 @@ pub fn verify_witness_commitment<E: PairingEngine>(
 /// [\[BKSV20\]](https://eprint.iacr.org/2020/811)
 pub fn rerandomize_proof<E, R>(proof: &Proof<E>, vk: &VerifyingKey<E>, rng: &mut R) -> Proof<E>
 where
-    E: PairingEngine,
+    E: Pairing,
     R: Rng,
 {
     // These are our rerandomization factors. They must be nonzero and uniformly sampled.
-    let (mut r1, mut r2) = (E::Fr::zero(), E::Fr::zero());
+    let (mut r1, mut r2) = (E::ScalarField::zero(), E::ScalarField::zero());
     while r1.is_zero() || r2.is_zero() {
-        r1 = E::Fr::rand(rng);
-        r2 = E::Fr::rand(rng);
+        r1 = E::ScalarField::rand(rng);
+        r2 = E::ScalarField::rand(rng);
     }
 
     //   A' = (1/r₁)A
@@ -494,8 +503,8 @@ where
     Proof {
         a: new_a.into_affine(),
         b: new_b.into_affine(),
-        c: new_c,
-        d: new_d,
+        c: new_c.into_affine(),
+        d: new_d.into_affine(),
     }
 }
 
@@ -503,21 +512,21 @@ where
 /// commitment to witnesses. See comments of `rerandomize_proof` for more.
 pub fn rerandomize_proof_1<E, R>(
     proof: &Proof<E>,
-    old_v: E::Fr,
-    new_v: E::Fr,
+    old_v: E::ScalarField,
+    new_v: E::ScalarField,
     vk: &VerifyingKey<E>,
     eta_delta_inv_g1: &E::G1Affine,
     rng: &mut R,
 ) -> Proof<E>
 where
-    E: PairingEngine,
+    E: Pairing,
     R: Rng,
 {
     // These are our rerandomization factors. They must be nonzero and uniformly sampled.
-    let (mut r1, mut r2) = (E::Fr::zero(), E::Fr::zero());
+    let (mut r1, mut r2) = (E::ScalarField::zero(), E::ScalarField::zero());
     while r1.is_zero() || r2.is_zero() {
-        r1 = E::Fr::rand(rng);
-        r2 = E::Fr::rand(rng);
+        r1 = E::ScalarField::rand(rng);
+        r2 = E::ScalarField::rand(rng);
     }
 
     //   A' = (1/r₁)A
@@ -535,8 +544,8 @@ where
     Proof {
         a: new_a.into_affine(),
         b: new_b.into_affine(),
-        c: new_c,
-        d: new_d,
+        c: new_c.into_affine(),
+        d: new_d.into_affine(),
     }
 }
 
@@ -544,10 +553,10 @@ where
 #[inline]
 pub fn synthesize_circuit<E, C, QAP>(
     circuit: C,
-) -> crate::Result<(ConstraintSystemRef<E::Fr>, Vec<E::Fr>)>
+) -> crate::Result<(ConstraintSystemRef<E::ScalarField>, Vec<E::ScalarField>)>
 where
-    E: PairingEngine,
-    C: ConstraintSynthesizer<E::Fr>,
+    E: Pairing,
+    C: ConstraintSynthesizer<E::ScalarField>,
     QAP: R1CStoQAP,
 {
     let cs = ConstraintSystem::new_ref();
@@ -568,24 +577,19 @@ where
     end_timer!(lc_time);
 
     let witness_map_time = start_timer!(|| "R1CS to QAP witness map");
-    let h = QAP::witness_map::<E::Fr, GeneralEvaluationDomain<E::Fr>>(cs.clone())?;
+    let h =
+        QAP::witness_map::<E::ScalarField, GeneralEvaluationDomain<E::ScalarField>>(cs.clone())?;
     end_timer!(witness_map_time);
     Ok((cs, h))
 }
 
-fn calculate_coeff<G: AffineCurve>(
-    initial: G::Projective,
+fn calculate_coeff<G: AffineRepr>(
+    initial: G::Group,
     query: &[G],
     vk_param: G,
     assignment: &[<G::ScalarField as PrimeField>::BigInt],
-) -> G::Projective {
+) -> G::Group {
     let el = query[0];
-    let acc = VariableBaseMSM::multi_scalar_mul(&query[1..], assignment);
-
-    let mut res = initial;
-    res.add_assign_mixed(&el);
-    res += &acc;
-    res.add_assign_mixed(&vk_param);
-
-    res
+    let acc = G::Group::msm_bigint(&query[1..], assignment);
+    initial + el + acc + vk_param
 }

@@ -5,21 +5,25 @@
 
 use crate::link::error::LinkError;
 use crate::link::utils::*;
-use ark_ec::{AffineCurve, PairingEngine, ProjectiveCurve};
-use ark_ff::{bytes::ToBytes, One, UniformRand};
-use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, SerializationError};
-use ark_std::io::{Read, Result as IoResult, Write};
-use ark_std::marker::PhantomData;
-use ark_std::ops::Neg;
-use ark_std::rand::Rng;
-use ark_std::vec;
-use ark_std::vec::Vec;
+use ark_ec::{pairing::Pairing, AffineRepr, CurveGroup};
+use ark_ff::{UniformRand, Zero};
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
+use ark_std::{
+    cfg_iter,
+    marker::PhantomData,
+    ops::{Mul, Neg},
+    rand::Rng,
+    vec::Vec,
+};
+
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
 
 /// Public params
 #[derive(Clone, Default, PartialEq, Debug, CanonicalSerialize, CanonicalDeserialize)]
 pub struct PP<
-    G1: Clone + ToBytes + Default + CanonicalSerialize + CanonicalDeserialize,
-    G2: Clone + ToBytes + Default + CanonicalSerialize + CanonicalDeserialize,
+    G1: Clone + Default + CanonicalSerialize + CanonicalDeserialize,
+    G2: Clone + Default + CanonicalSerialize + CanonicalDeserialize,
 > {
     pub l: usize, // # of rows
     pub t: usize, // # of cols
@@ -28,8 +32,8 @@ pub struct PP<
 }
 
 impl<
-        G1: Clone + ToBytes + Default + CanonicalSerialize + CanonicalDeserialize,
-        G2: Clone + ToBytes + Default + CanonicalSerialize + CanonicalDeserialize,
+        G1: Clone + Default + CanonicalSerialize + CanonicalDeserialize,
+        G2: Clone + Default + CanonicalSerialize + CanonicalDeserialize,
     > PP<G1, G2>
 {
     pub fn new(l: usize, t: usize, g1: G1, g2: G2) -> PP<G1, G2> {
@@ -37,39 +41,17 @@ impl<
     }
 }
 
-impl<
-        G1: Clone + ToBytes + Default + CanonicalSerialize + CanonicalDeserialize,
-        G2: Clone + ToBytes + Default + CanonicalSerialize + CanonicalDeserialize,
-    > ToBytes for PP<G1, G2>
-{
-    fn write<W: Write>(&self, _: W) -> IoResult<()> {
-        unimplemented!();
-    }
-}
-
 /// Evaluation key
 #[derive(Clone, Default, PartialEq, Debug, CanonicalSerialize, CanonicalDeserialize)]
-pub struct EK<G1: Clone + ToBytes + Default + CanonicalSerialize + CanonicalDeserialize> {
+pub struct EK<G1: Clone + Default + CanonicalSerialize + CanonicalDeserialize> {
     pub p: Vec<G1>,
-}
-
-impl<G1: Clone + ToBytes + Default + CanonicalSerialize + CanonicalDeserialize> ToBytes for EK<G1> {
-    fn write<W: Write>(&self, _: W) -> IoResult<()> {
-        unimplemented!();
-    }
 }
 
 /// Verification key
 #[derive(Clone, Default, PartialEq, Debug, CanonicalSerialize, CanonicalDeserialize)]
-pub struct VK<G2: Clone + ToBytes + Default + CanonicalSerialize + CanonicalDeserialize> {
+pub struct VK<G2: Clone + Default + CanonicalSerialize + CanonicalDeserialize> {
     pub c: Vec<G2>,
     pub a: G2,
-}
-
-impl<G2: Clone + ToBytes + Default + CanonicalSerialize + CanonicalDeserialize> ToBytes for VK<G2> {
-    fn write<W: Write>(&self, _: W) -> IoResult<()> {
-        unimplemented!();
-    }
 }
 
 pub trait SubspaceSnark {
@@ -98,14 +80,14 @@ pub trait SubspaceSnark {
     ) -> Result<(), LinkError>;
 }
 
-pub struct PESubspaceSnark<PE: PairingEngine> {
+pub struct PESubspaceSnark<PE: Pairing> {
     pairing_engine_type: PhantomData<PE>,
 }
 
 // NB: Now the system is for y = Mx
-impl<PE: PairingEngine> SubspaceSnark for PESubspaceSnark<PE> {
+impl<PE: Pairing> SubspaceSnark for PESubspaceSnark<PE> {
     type KMtx = SparseMatrix<PE::G1Affine>;
-    type InVec = PE::Fr;
+    type InVec = PE::ScalarField;
     type OutVec = PE::G1Affine;
 
     type PP = PP<PE::G1Affine, PE::G2Affine>;
@@ -126,12 +108,12 @@ impl<PE: PairingEngine> SubspaceSnark for PESubspaceSnark<PE> {
         m: &Self::KMtx,
     ) -> Result<(Self::EK, Self::VK), LinkError> {
         // `k` is the trapdoor
-        let mut k: Vec<PE::Fr> = Vec::with_capacity(pp.l);
+        let mut k: Vec<PE::ScalarField> = Vec::with_capacity(pp.l);
         for _ in 0..pp.l {
-            k.push(PE::Fr::rand(rng));
+            k.push(PE::ScalarField::rand(rng));
         }
 
-        let a = PE::Fr::rand(rng);
+        let a = PE::ScalarField::rand(rng);
 
         let p = SparseLinAlgebra::<PE>::sparse_vector_matrix_mult(&k, m)?;
 
@@ -164,12 +146,13 @@ impl<PE: PairingEngine> SubspaceSnark for PESubspaceSnark<PE> {
             return Err(LinkError::VectorLongerThanExpected(x.len(), vk.c.len()));
         }
 
-        let mut pairs = vec![];
-        for i in 0..x.len() {
-            pairs.push((PE::G1Prepared::from(x[i]), PE::G2Prepared::from(vk.c[i])));
-        }
-        pairs.push((PE::G1Prepared::from(*pi), PE::G2Prepared::from(vk.a.neg())));
-        if PE::Fqk::one() != PE::product_of_pairings(pairs.iter()) {
+        let mut a = x.to_vec();
+        let mut b = cfg_iter!(vk.c[0..x.len()])
+            .map(|b| PE::G2Prepared::from(*b))
+            .collect::<Vec<_>>();
+        a.push(*pi);
+        b.push(PE::G2Prepared::from(vk.a.into_group().neg()));
+        if !PE::multi_pairing(a, b).is_zero() {
             return Err(LinkError::InvalidProof);
         }
         Ok(())

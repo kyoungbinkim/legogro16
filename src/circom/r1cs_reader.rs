@@ -2,8 +2,8 @@
 //! Largely copied from <https://github.com/gakonst/ark-circom/blob/master/src/circom/r1cs_reader.rs>
 //! Spec: <https://github.com/iden3/r1csfile/blob/master/doc/r1cs_bin_format.md>
 
-use ark_ec::PairingEngine;
-use ark_ff::FromBytes;
+use ark_ec::pairing::Pairing;
+use ark_serialize::CanonicalDeserialize;
 use ark_std::collections::BTreeMap;
 use ark_std::format;
 use ark_std::io::Read;
@@ -15,7 +15,7 @@ use crate::circom::error::CircomError;
 use crate::circom::r1cs::{Constraint, Header, R1CSFile, LC};
 use crate::circom::witness::check_subgroup_order;
 
-impl<E: PairingEngine> R1CSFile<E> {
+impl<E: Pairing> R1CSFile<E> {
     pub fn new_from_file(path: impl AsRef<std::path::Path>) -> Result<Self, CircomError> {
         let reader = std::fs::File::open(path).map_err(|err| {
             log::error!("Encountered error while opening R1CS file: {:?}", err);
@@ -111,7 +111,7 @@ impl<E: PairingEngine> R1CSFile<E> {
     }
 }
 
-impl<E: PairingEngine> Header<E> {
+impl<E: Pairing> Header<E> {
     fn new<R: Read>(mut reader: R, size: u64) -> Result<Header<E>, CircomError> {
         let field_size = read_u32(&mut reader)?;
         if field_size != 32 {
@@ -179,13 +179,13 @@ fn seek<R: Read + Seek>(mut reader: R, pos: SeekFrom) -> Result<u64, CircomError
 }
 
 /// Read a linear combination
-fn read_lc<R: Read, E: PairingEngine>(mut reader: R) -> Result<LC<E>, CircomError> {
+fn read_lc<R: Read, E: Pairing>(mut reader: R) -> Result<LC<E>, CircomError> {
     let num_terms = read_u32(&mut reader)? as usize;
     let mut terms = Vec::with_capacity(num_terms);
     for _ in 0..num_terms {
         terms.push((
             read_u32(&mut reader)? as usize, // wire_id
-            E::Fr::read(&mut reader) // coefficient
+            E::ScalarField::deserialize_uncompressed(&mut reader) // coefficient
                 .map_err(|err| {
                     log::error!("Encountered error while parsing R1CS file: {:?}", err);
                     CircomError::R1CSFileParsing(format!(
@@ -199,7 +199,7 @@ fn read_lc<R: Read, E: PairingEngine>(mut reader: R) -> Result<LC<E>, CircomErro
 }
 
 /// Read all the constraints where each constraint is a 3-tuple of linear combinations
-fn read_constraints<R: Read, E: PairingEngine>(
+fn read_constraints<R: Read, E: Pairing>(
     mut reader: R,
     header: &Header<E>,
 ) -> Result<Vec<Constraint<E>>, CircomError> {
@@ -218,7 +218,7 @@ fn read_constraints<R: Read, E: PairingEngine>(
 
 /// Read the wire to label map. The labels not part of constraints because they were
 /// optimized out are not part of this map.
-fn read_map<R: Read, E: PairingEngine>(
+fn read_map<R: Read, E: Pairing>(
     mut reader: R,
     size: u64,
     header: &Header<E>,
@@ -252,7 +252,7 @@ mod tests {
     use std::str::FromStr;
 
     /// Some basic checks that should be true for all supported circuits
-    fn basic_checks<E: PairingEngine>(file: &R1CSFile<E>, curve_type: Curve) {
+    fn basic_checks<E: Pairing>(file: &R1CSFile<E>, curve_type: Curve) {
         assert_eq!(file.version, 1);
         assert_eq!(file.header.field_size, 32);
         assert_eq!(file.header.curve, curve_type);
@@ -389,7 +389,7 @@ mod tests {
 
     #[test]
     fn multiply2() {
-        fn check<E: PairingEngine>(file: &R1CSFile<E>, curve_type: Curve) {
+        fn check<E: Pairing>(file: &R1CSFile<E>, curve_type: Curve) {
             basic_checks(&file, curve_type);
             // 4 wires, 1st wire for constant 1, 2nd for input a, 3rd for input b and 4th for input c.
             assert_eq!(file.header.n_wires, 4);
@@ -422,7 +422,7 @@ mod tests {
 
     #[test]
     fn test_1() {
-        fn check<E: PairingEngine>(file: &R1CSFile<E>, curve_type: Curve) {
+        fn check<E: Pairing>(file: &R1CSFile<E>, curve_type: Curve) {
             basic_checks(&file, curve_type);
             assert_eq!(file.header.n_wires, 4);
             assert_eq!(file.header.n_labels, 5);
@@ -455,7 +455,7 @@ mod tests {
 
     #[test]
     fn test_2() {
-        fn check<E: PairingEngine>(file: &R1CSFile<E>, curve_type: Curve) {
+        fn check<E: Pairing>(file: &R1CSFile<E>, curve_type: Curve) {
             basic_checks(&file, curve_type);
             assert_eq!(file.header.n_wires, 6);
             assert_eq!(file.header.n_labels, 7);
@@ -491,7 +491,7 @@ mod tests {
 
     #[test]
     fn test_3() {
-        fn check<E: PairingEngine>(file: &R1CSFile<E>, curve_type: Curve) {
+        fn check<E: Pairing>(file: &R1CSFile<E>, curve_type: Curve) {
             basic_checks(&file, curve_type);
             assert_eq!(file.header.n_wires, 12);
             assert_eq!(file.header.n_labels, 14);
@@ -531,7 +531,7 @@ mod tests {
 
     #[test]
     fn test_4() {
-        fn check<E: PairingEngine>(file: &R1CSFile<E>, curve_type: Curve) {
+        fn check<E: Pairing>(file: &R1CSFile<E>, curve_type: Curve) {
             basic_checks(&file, curve_type);
             assert_eq!(file.header.n_wires, 40);
             assert_eq!(file.header.n_labels, 42);
@@ -554,7 +554,7 @@ mod tests {
 
     #[test]
     fn multiply_n() {
-        fn check<E: PairingEngine>(file: &R1CSFile<E>, curve_type: Curve) {
+        fn check<E: Pairing>(file: &R1CSFile<E>, curve_type: Curve) {
             basic_checks(&file, curve_type);
             assert_eq!(file.header.n_wires, 600);
             assert_eq!(file.header.n_labels, 602);
@@ -594,7 +594,7 @@ mod tests {
 
     #[test]
     fn nconstraints() {
-        fn check<E: PairingEngine>(file: &R1CSFile<E>, curve_type: Curve) {
+        fn check<E: Pairing>(file: &R1CSFile<E>, curve_type: Curve) {
             basic_checks(&file, curve_type);
             assert_eq!(file.header.n_pub_out, 1);
             assert_eq!(file.header.n_pub_in, 0);

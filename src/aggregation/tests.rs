@@ -1,6 +1,5 @@
-use super::transcript::Transcript;
-use crate::aggregation::{groth16, legogroth16};
-use crate::aggregation::{srs, transcript};
+use crate::aggregation::srs::PreparedProverSRS;
+use crate::aggregation::{groth16, legogroth16, srs};
 use crate::{create_random_proof, generate_random_parameters, prepare_verifying_key, verify_proof};
 use ark_bls12_381::{Bls12_381, Fr};
 use ark_ff::{Field, One};
@@ -8,9 +7,11 @@ use ark_relations::lc;
 use ark_relations::r1cs::{
     ConstraintSynthesizer, ConstraintSystemRef, LinearCombination, SynthesisError, Variable,
 };
+use ark_snark::SNARK;
 use ark_std::rand::prelude::StdRng;
 use ark_std::rand::SeedableRng;
 use ark_std::UniformRand;
+use dock_crypto_utils::transcript::{new_merlin_transcript, Transcript};
 use std::marker::PhantomData;
 use std::time::Instant;
 
@@ -124,6 +125,7 @@ fn legogroth16_aggregation() {
     // number of proofs
     let srs = srs::setup_fake_srs::<Bls12_381, _>(&mut rng, nproofs);
     let (prover_srs, ver_srs) = srs.specialize(nproofs);
+    let prepared_srs = PreparedProverSRS::from(prover_srs.clone());
 
     // create all the proofs
     // let mut vs = vec![];
@@ -143,25 +145,38 @@ fn legogroth16_aggregation() {
         verify_proof(&pvk, &proofs[i], &inputs).unwrap();
     }
     println!(
-        "Time to verify {} proofs one by one {:?}",
+        "Time to verify {} LegoGroth16 proofs one by one {:?}",
         nproofs,
         start.elapsed()
     );
 
     let start = Instant::now();
-    let mut prover_transcript = transcript::new_merlin_transcript(b"test aggregation");
+    let mut prover_transcript = new_merlin_transcript(b"test aggregation");
     prover_transcript.append(b"public-inputs", &all_inputs);
-    let aggregate_proof =
-        legogroth16::aggregate_proofs(&prover_srs, &mut prover_transcript, &proofs)
+    let aggregate_proof_ =
+        legogroth16::aggregate_proofs(prover_srs.clone(), &mut prover_transcript, &proofs)
             .expect("error in aggregation");
     println!(
-        "Time to create aggregate proofs from {} proofs: {:?}",
+        "Time to create aggregate proofs from {} LegoGroth16 proofs: {:?}",
         nproofs,
         start.elapsed()
     );
 
     let start = Instant::now();
-    let mut ver_transcript = transcript::new_merlin_transcript(b"test aggregation");
+    let mut prover_transcript = new_merlin_transcript(b"test aggregation");
+    prover_transcript.append(b"public-inputs", &all_inputs);
+    let aggregate_proof =
+        legogroth16::aggregate_proofs(prepared_srs.clone(), &mut prover_transcript, &proofs)
+            .expect("error in aggregation");
+    println!(
+        "Time to create aggregate proofs from {} LegoGroth16 proofs using prepared SRS: {:?}",
+        nproofs,
+        start.elapsed()
+    );
+    assert_eq!(aggregate_proof, aggregate_proof_);
+
+    let start = Instant::now();
+    let mut ver_transcript = new_merlin_transcript(b"test aggregation");
     ver_transcript.append(b"public-inputs", &all_inputs);
     legogroth16::verify_aggregate_proof(
         &ver_srs,
@@ -174,17 +189,20 @@ fn legogroth16_aggregation() {
     )
     .expect("error in verification");
     println!(
-        "Time to verify aggregate proofs from {} proofs: {:?}",
+        "Time to verify aggregate proofs from {} LegoGroth16 proofs: {:?}",
         nproofs,
         start.elapsed()
     );
 
     let start = Instant::now();
-    let mut prover_transcript = transcript::new_merlin_transcript(b"test aggregation");
+    let mut prover_transcript = new_merlin_transcript(b"test aggregation");
     prover_transcript.append(b"public-inputs", &all_inputs);
-    let (aggregate_proof, d) =
-        legogroth16::using_groth16::aggregate_proofs(&prover_srs, &mut prover_transcript, &proofs)
-            .expect("error in aggregation");
+    let (aggregate_proof_, d_) = legogroth16::using_groth16::aggregate_proofs(
+        prover_srs.clone(),
+        &mut prover_transcript,
+        &proofs,
+    )
+    .expect("error in aggregation");
     println!(
         "Time to create aggregate proofs from {} proofs using groth16 scheme: {:?}",
         nproofs,
@@ -192,7 +210,24 @@ fn legogroth16_aggregation() {
     );
 
     let start = Instant::now();
-    let mut ver_transcript = transcript::new_merlin_transcript(b"test aggregation");
+    let mut prover_transcript = new_merlin_transcript(b"test aggregation");
+    prover_transcript.append(b"public-inputs", &all_inputs);
+    let (aggregate_proof, d) = legogroth16::using_groth16::aggregate_proofs(
+        prepared_srs.clone(),
+        &mut prover_transcript,
+        &proofs,
+    )
+    .expect("error in aggregation");
+    println!(
+        "Time to create aggregate proofs from {} proofs using groth16 scheme and prepared SRS: {:?}",
+        nproofs,
+        start.elapsed()
+    );
+    assert_eq!(aggregate_proof, aggregate_proof_);
+    assert_eq!(d, d_);
+
+    let start = Instant::now();
+    let mut ver_transcript = new_merlin_transcript(b"test aggregation");
     ver_transcript.append(b"public-inputs", &all_inputs);
     legogroth16::using_groth16::verify_aggregate_proof(
         &ver_srs,
@@ -231,6 +266,7 @@ fn legogroth16_aggregation_multiply() {
     // number of proofs
     let srs = srs::setup_fake_srs::<Bls12_381, _>(&mut rng, nproofs);
     let (prover_srs, ver_srs) = srs.specialize(nproofs);
+    let prepared_srs = PreparedProverSRS::from(prover_srs.clone());
 
     // create all the proofs
     let mut all_inputs = vec![];
@@ -260,25 +296,38 @@ fn legogroth16_aggregation_multiply() {
         verify_proof(&pvk, &proofs[i], &all_inputs[i]).unwrap();
     }
     println!(
-        "Time to verify {} proofs one by one {:?}",
+        "Time to verify {} LegoGroth16 proofs one by one {:?}",
         nproofs,
         start.elapsed()
     );
 
     let start = Instant::now();
-    let mut prover_transcript = transcript::new_merlin_transcript(b"test aggregation");
+    let mut prover_transcript = new_merlin_transcript(b"test aggregation");
     prover_transcript.append(b"public-inputs", &all_inputs);
-    let aggregate_proof =
-        legogroth16::aggregate_proofs(&prover_srs, &mut prover_transcript, &proofs)
+    let aggregate_proof_ =
+        legogroth16::aggregate_proofs(prover_srs.clone(), &mut prover_transcript, &proofs)
             .expect("error in aggregation");
     println!(
-        "Time to create aggregate proofs from {} proofs: {:?}",
+        "Time to create aggregate proofs from {} LegoGroth16 proofs: {:?}",
         nproofs,
         start.elapsed()
     );
 
     let start = Instant::now();
-    let mut ver_transcript = transcript::new_merlin_transcript(b"test aggregation");
+    let mut prover_transcript = new_merlin_transcript(b"test aggregation");
+    prover_transcript.append(b"public-inputs", &all_inputs);
+    let aggregate_proof =
+        legogroth16::aggregate_proofs(prepared_srs.clone(), &mut prover_transcript, &proofs)
+            .expect("error in aggregation");
+    println!(
+        "Time to create aggregate proofs from {} LegoGroth16 proofs using prepared SRS: {:?}",
+        nproofs,
+        start.elapsed()
+    );
+    assert_eq!(aggregate_proof, aggregate_proof_);
+
+    let start = Instant::now();
+    let mut ver_transcript = new_merlin_transcript(b"test aggregation");
     ver_transcript.append(b"public-inputs", &all_inputs);
     legogroth16::verify_aggregate_proof(
         &ver_srs,
@@ -297,19 +346,39 @@ fn legogroth16_aggregation_multiply() {
     );
 
     let start = Instant::now();
-    let mut prover_transcript = transcript::new_merlin_transcript(b"test aggregation");
+    let mut prover_transcript = new_merlin_transcript(b"test aggregation");
     prover_transcript.append(b"public-inputs", &all_inputs);
-    let (aggregate_proof, d) =
-        legogroth16::using_groth16::aggregate_proofs(&prover_srs, &mut prover_transcript, &proofs)
-            .expect("error in aggregation");
+    let (aggregate_proof_, d_) = legogroth16::using_groth16::aggregate_proofs(
+        prover_srs.clone(),
+        &mut prover_transcript,
+        &proofs,
+    )
+    .expect("error in aggregation");
     println!(
-        "Time to create aggregate proofs from {} proofs using groth16 scheme: {:?}",
+        "Time to create aggregate proofs from {} LegoGorth16 proofs using groth16 scheme: {:?}",
         nproofs,
         start.elapsed()
     );
 
     let start = Instant::now();
-    let mut ver_transcript = transcript::new_merlin_transcript(b"test aggregation");
+    let mut prover_transcript = new_merlin_transcript(b"test aggregation");
+    prover_transcript.append(b"public-inputs", &all_inputs);
+    let (aggregate_proof, d) = legogroth16::using_groth16::aggregate_proofs(
+        prepared_srs.clone(),
+        &mut prover_transcript,
+        &proofs,
+    )
+    .expect("error in aggregation");
+    println!(
+        "Time to create aggregate proofs from {} LegoGorth16 proofs using groth16 scheme using prepared SRS: {:?}",
+        nproofs,
+        start.elapsed()
+    );
+    assert_eq!(aggregate_proof, aggregate_proof_);
+    assert_eq!(d, d_);
+
+    let start = Instant::now();
+    let mut ver_transcript = new_merlin_transcript(b"test aggregation");
     ver_transcript.append(b"public-inputs", &all_inputs);
     legogroth16::using_groth16::verify_aggregate_proof(
         &ver_srs,
@@ -334,23 +403,25 @@ fn groth16_aggregation() {
     let num_constraints = 1000;
     let nproofs = 8;
     let mut rng = StdRng::seed_from_u64(0u64);
-    let params = {
+    let (pk, vk) = {
         let c = Benchmark::<Fr>::new(num_constraints);
-        ark_groth16::generate_random_parameters::<Bls12_381, _, _>(c, &mut rng).unwrap()
+        ark_groth16::Groth16::<Bls12_381>::circuit_specific_setup(c, &mut rng).unwrap()
     };
     // prepare the verification key
-    let pvk = ark_groth16::prepare_verifying_key(&params.vk);
+    let pvk = ark_groth16::prepare_verifying_key(&vk);
     // prepare the SRS needed for snarkpack - specialize after to the right
     // number of proofs
     let srs = srs::setup_fake_srs::<Bls12_381, _>(&mut rng, nproofs);
     let (prover_srs, ver_srs) = srs.specialize(nproofs);
+    let prepared_srs = PreparedProverSRS::from(prover_srs.clone());
 
     // create all the proofs
     // let mut vs = vec![];
     let proofs = (0..nproofs)
         .map(|_| {
             let c = Benchmark::new(num_constraints);
-            ark_groth16::create_random_proof(c, &params, &mut rng).expect("proof creation failed")
+            ark_groth16::Groth16::<Bls12_381>::prove(&pk, c, &mut rng)
+                .expect("proof creation failed")
         })
         .collect::<Vec<_>>();
     // verify we can at least verify one
@@ -359,7 +430,7 @@ fn groth16_aggregation() {
 
     let start = Instant::now();
     for i in 0..nproofs {
-        ark_groth16::verify_proof(&pvk, &proofs[i], &inputs).unwrap();
+        ark_groth16::Groth16::<Bls12_381>::verify_proof(&pvk, &proofs[i], &inputs).unwrap();
     }
     println!(
         "Time to verify {} proofs one by one {:?}",
@@ -368,10 +439,11 @@ fn groth16_aggregation() {
     );
 
     let start = Instant::now();
-    let mut prover_transcript = transcript::new_merlin_transcript(b"test aggregation");
+    let mut prover_transcript = new_merlin_transcript(b"test aggregation");
     prover_transcript.append(b"public-inputs", &all_inputs);
-    let aggregate_proof = groth16::aggregate_proofs(&prover_srs, &mut prover_transcript, &proofs)
-        .expect("error in aggregation");
+    let aggregate_proof =
+        groth16::aggregate_proofs(prepared_srs.clone(), &mut prover_transcript, &proofs)
+            .expect("error in aggregation");
     println!(
         "Time to create aggregate proofs from {} proofs: {:?}",
         nproofs,
@@ -379,7 +451,7 @@ fn groth16_aggregation() {
     );
 
     let start = Instant::now();
-    let mut ver_transcript = transcript::new_merlin_transcript(b"test aggregation");
+    let mut ver_transcript = new_merlin_transcript(b"test aggregation");
     ver_transcript.append(b"public-inputs", &all_inputs);
     groth16::verify_aggregate_proof(
         &ver_srs,
@@ -403,20 +475,21 @@ fn groth16_aggregation_multiply() {
     let num_constraints = 1000;
     let nproofs = 32;
     let mut rng = StdRng::seed_from_u64(0u64);
-    let params = {
+    let (pk, vk) = {
         let c = Multiply {
             num_constraints,
             a: None,
             b: None,
         };
-        ark_groth16::generate_random_parameters::<Bls12_381, _, _>(c, &mut rng).unwrap()
+        ark_groth16::Groth16::<Bls12_381>::circuit_specific_setup(c, &mut rng).unwrap()
     };
     // prepare the verification key
-    let pvk = ark_groth16::prepare_verifying_key(&params.vk);
+    let pvk = ark_groth16::prepare_verifying_key(&vk);
     // prepare the SRS needed for snarkpack - specialize after to the right
     // number of proofs
     let srs = srs::setup_fake_srs::<Bls12_381, _>(&mut rng, nproofs);
     let (prover_srs, ver_srs) = srs.specialize(nproofs);
+    let prepared_srs = PreparedProverSRS::from(prover_srs.clone());
 
     // create all the proofs
     let mut all_inputs = vec![];
@@ -425,13 +498,13 @@ fn groth16_aggregation_multiply() {
             let a = Fr::from(10 * i as u64);
             let b = Fr::from(20 * i as u64);
             all_inputs.push(vec![a * b]);
-            ark_groth16::create_random_proof(
+            ark_groth16::Groth16::<Bls12_381>::prove(
+                &pk,
                 Multiply {
                     num_constraints,
                     a: Some(a),
                     b: Some(b),
                 },
-                &params,
                 &mut rng,
             )
             .expect("proof creation failed")
@@ -441,7 +514,7 @@ fn groth16_aggregation_multiply() {
     // verify one by one
     let start = Instant::now();
     for i in 0..nproofs {
-        ark_groth16::verify_proof(&pvk, &proofs[i], &all_inputs[i]).unwrap();
+        ark_groth16::Groth16::<Bls12_381>::verify_proof(&pvk, &proofs[i], &all_inputs[i]).unwrap();
     }
     println!(
         "Time to verify {} proofs one by one {:?}",
@@ -450,10 +523,11 @@ fn groth16_aggregation_multiply() {
     );
 
     let start = Instant::now();
-    let mut prover_transcript = transcript::new_merlin_transcript(b"test aggregation");
+    let mut prover_transcript = new_merlin_transcript(b"test aggregation");
     prover_transcript.append(b"public-inputs", &all_inputs);
-    let aggregate_proof = groth16::aggregate_proofs(&prover_srs, &mut prover_transcript, &proofs)
-        .expect("error in aggregation");
+    let aggregate_proof =
+        groth16::aggregate_proofs(prepared_srs.clone(), &mut prover_transcript, &proofs)
+            .expect("error in aggregation");
     println!(
         "Time to create aggregate proofs from {} proofs: {:?}",
         nproofs,
@@ -461,7 +535,7 @@ fn groth16_aggregation_multiply() {
     );
 
     let start = Instant::now();
-    let mut ver_transcript = transcript::new_merlin_transcript(b"test aggregation");
+    let mut ver_transcript = new_merlin_transcript(b"test aggregation");
     ver_transcript.append(b"public-inputs", &all_inputs);
     groth16::verify_aggregate_proof(
         &ver_srs,

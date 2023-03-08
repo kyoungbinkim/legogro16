@@ -1,27 +1,25 @@
-use ark_ec::msm::VariableBaseMSM;
-use ark_ec::{AffineCurve, PairingEngine, ProjectiveCurve};
+use ark_ec::pairing::{Pairing, PairingOutput};
+use ark_ec::{AffineRepr, CurveGroup, Group, VariableBaseMSM};
 use ark_ff::{Field, One, PrimeField, Zero};
-use ark_poly::univariate::DensePolynomial;
-use ark_poly::UVPolynomial;
-use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, SerializationError};
-use ark_std::io::{Read, Write};
+use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial};
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::ops::{MulAssign, Neg};
 use ark_std::{cfg_iter, format, string::ToString, vec, vec::Vec};
+use dock_crypto_utils::randomized_pairing_check::RandomizedPairingChecker;
 
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
 use crate::aggregation::error::AggregationError;
-use crate::aggregation::pairing_check::PairingCheck;
 use crate::aggregation::srs::VerifierSRSProjective;
 
 /// KZGOpening represents the KZG opening of a commitment key (which is a tuple
 /// given commitment keys are a tuple).
 #[derive(Clone, Debug, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
-pub struct KZGOpening<G: AffineCurve>(pub G, pub G);
+pub struct KZGOpening<G: AffineRepr>(pub G, pub G);
 
-impl<G: AffineCurve> KZGOpening<G> {
-    pub fn new_from_proj(a: G::Projective, b: G::Projective) -> Self {
+impl<G: AffineRepr> KZGOpening<G> {
+    pub fn new_from_proj(a: G::Group, b: G::Group) -> Self {
         KZGOpening(a.into_affine(), b.into_affine())
     }
 }
@@ -29,26 +27,25 @@ impl<G: AffineCurve> KZGOpening<G> {
 /// verify_kzg_opening_g2 takes a KZG opening, the final commitment key, SRS and
 /// any shift (in TIPP we shift the v commitment by r^-1) and returns a pairing
 /// tuple to check if the opening is correct or not.
-pub(crate) fn verify_kzg_v<E: PairingEngine>(
+pub(crate) fn verify_kzg_v<E: Pairing>(
     v_srs: &VerifierSRSProjective<E>,
     final_vkey: &(E::G2Affine, E::G2Affine),
     vkey_opening: &KZGOpening<E::G2Affine>,
-    challenges: &[E::Fr],
-    kzg_challenge: &E::Fr,
-    pairing_checker: &mut PairingCheck<E>,
+    challenges: &[E::ScalarField],
+    kzg_challenge: &E::ScalarField,
+    pairing_checker: &mut RandomizedPairingChecker<E>,
 ) {
     // f_v(z)
     let vpoly_eval_z = polynomial_evaluation_product_form_from_transcript(
         challenges,
         kzg_challenge,
-        &E::Fr::one(),
+        &E::ScalarField::one(),
     );
     // -g such that when we test a pairing equation we only need to check if
     // it's equal 1 at the end:
     // e(a,b) = e(c,d) <=> e(a,b)e(-c,d) = 1
-    let mut ng = v_srs.g.into_affine();
+    let ng = v_srs.g.neg().into_affine();
     // e(A,B) = e(C,D) <=> e(A,B)e(-C,D) == 1 <=> e(A,B)e(C,D)^-1 == 1
-    ng = ng.neg();
 
     // e(g, C_f * h^{-y}) == e(v1 * g^{-x}, \pi) = 1
     kzg_check_v::<E>(
@@ -56,7 +53,7 @@ pub(crate) fn verify_kzg_v<E: PairingEngine>(
         ng,
         *kzg_challenge,
         vpoly_eval_z,
-        final_vkey.0.into_projective(),
+        final_vkey.0.into_group(),
         v_srs.g_alpha,
         vkey_opening.0,
         pairing_checker,
@@ -68,7 +65,7 @@ pub(crate) fn verify_kzg_v<E: PairingEngine>(
         ng,
         *kzg_challenge,
         vpoly_eval_z,
-        final_vkey.1.into_projective(),
+        final_vkey.1.into_group(),
         v_srs.g_beta,
         vkey_opening.1,
         pairing_checker,
@@ -76,14 +73,14 @@ pub(crate) fn verify_kzg_v<E: PairingEngine>(
 }
 
 /// Similar to verify_kzg_opening_g2 but for g1.
-pub(crate) fn verify_kzg_w<E: PairingEngine>(
+pub(crate) fn verify_kzg_w<E: Pairing>(
     v_srs: &VerifierSRSProjective<E>,
     final_wkey: &(E::G1Affine, E::G1Affine),
     wkey_opening: &KZGOpening<E::G1Affine>,
-    challenges: &[E::Fr],
-    r_shift: &E::Fr,
-    kzg_challenge: &E::Fr,
-    pairing_checker: &mut PairingCheck<E>,
+    challenges: &[E::ScalarField],
+    r_shift: &E::ScalarField,
+    kzg_challenge: &E::ScalarField,
+    pairing_checker: &mut RandomizedPairingChecker<E>,
 ) {
     // compute in parallel f(z) and z^n and then combines into f_w(z) = z^n * f(z)
     let fz = polynomial_evaluation_product_form_from_transcript(challenges, kzg_challenge, r_shift);
@@ -91,8 +88,7 @@ pub(crate) fn verify_kzg_w<E: PairingEngine>(
     let mut fwz = fz;
     fwz.mul_assign(&zn);
 
-    let mut nh = v_srs.h.into_affine();
-    nh = nh.neg();
+    let nh = v_srs.h.neg().into_affine();
 
     // e(C_f * g^{-y}, h) = e(\pi, w1 * h^{-x})
     kzg_check_w::<E>(
@@ -100,7 +96,7 @@ pub(crate) fn verify_kzg_w<E: PairingEngine>(
         nh,
         *kzg_challenge,
         fwz,
-        final_wkey.0.into_projective(),
+        final_wkey.0.into_group(),
         v_srs.h_alpha,
         wkey_opening.0,
         pairing_checker,
@@ -112,60 +108,68 @@ pub(crate) fn verify_kzg_w<E: PairingEngine>(
         nh,
         *kzg_challenge,
         fwz,
-        final_wkey.1.into_projective(),
+        final_wkey.1.into_group(),
         v_srs.h_beta,
         wkey_opening.1,
         pairing_checker,
     );
 }
 
-fn kzg_check_v<E: PairingEngine>(
+fn kzg_check_v<E: Pairing>(
     v_srs: &VerifierSRSProjective<E>,
     ng: E::G1Affine,
-    x: E::Fr,
-    y: E::Fr,
-    cf: E::G2Projective,
-    vk: E::G1Projective,
+    x: E::ScalarField,
+    y: E::ScalarField,
+    cf: E::G2,
+    vk: E::G1,
     pi: E::G2Affine,
-    pairing_checker: &mut PairingCheck<E>,
+    pairing_checker: &mut RandomizedPairingChecker<E>,
 ) {
     // KZG Check: e(g, C_f * h^{-y}) = e(vk * g^{-x}, \pi)
     // Transformed, such that
     // e(-g, C_f * h^{-y}) * e(vk * g^{-x}, \pi) = 1
 
     // C_f - (y * h)
-    let b = (cf - v_srs.h.mul(y.into_repr())).into();
+    let b = (cf - v_srs.h.mul_bigint(y.into_bigint())).into();
 
     // vk - (g * x)
-    let c = (vk - (v_srs.g.mul(x.into_repr()))).into();
-    pairing_checker.add_sources_and_target(&[ng, c], &[b, pi], &E::Fqk::one(), false);
+    let c = (vk - (v_srs.g.mul_bigint(x.into_bigint()))).into();
+    pairing_checker.add_multiple_sources_and_target(
+        &[ng, c],
+        &[b, pi],
+        &PairingOutput::<E>::zero(),
+    );
 }
 
-fn kzg_check_w<E: PairingEngine>(
+fn kzg_check_w<E: Pairing>(
     v_srs: &VerifierSRSProjective<E>,
     nh: E::G2Affine,
-    x: E::Fr,
-    y: E::Fr,
-    cf: E::G1Projective,
-    wk: E::G2Projective,
+    x: E::ScalarField,
+    y: E::ScalarField,
+    cf: E::G1,
+    wk: E::G2,
     pi: E::G1Affine,
-    pairing_checker: &mut PairingCheck<E>,
+    pairing_checker: &mut RandomizedPairingChecker<E>,
 ) {
     // KZG Check: e(C_f * g^{-y}, h) = e(\pi, wk * h^{-x})
     // Transformed, such that
     // e(C_f * g^{-y}, -h) * e(\pi, wk * h^{-x}) = 1
 
     // C_f - (y * g)
-    let a = (cf - (v_srs.g.mul(y.into_repr()))).into();
+    let a = (cf - (v_srs.g.mul_bigint(y.into_bigint()))).into();
 
     // wk - (x * h)
-    let d = (wk - (v_srs.h.mul(x.into_repr()))).into();
-    pairing_checker.add_sources_and_target(&[a, pi], &[nh, d], &E::Fqk::one(), false);
+    let d = (wk - (v_srs.h.mul_bigint(x.into_bigint()))).into();
+    pairing_checker.add_multiple_sources_and_target(
+        &[a, pi],
+        &[nh, d],
+        &PairingOutput::<E>::zero(),
+    );
 }
 
 /// Returns the KZG opening proof for the given commitment key. Specifically, it
 /// returns $g^{f(alpha) - f(z) / (alpha - z)}$ for $a$ and $b$.
-fn create_kzg_opening<G: AffineCurve>(
+fn create_kzg_opening<G: AffineRepr>(
     srs_powers_alpha_table: &[G], // h^alpha^i
     srs_powers_beta_table: &[G],  // h^beta^i
     poly: DensePolynomial<G::ScalarField>,
@@ -193,7 +197,7 @@ fn create_kzg_opening<G: AffineCurve>(
     let mut quotient_polynomial_coeffs = quotient_polynomial.coeffs;
     quotient_polynomial_coeffs.resize(srs_powers_alpha_table.len(), <G::ScalarField>::zero());
     let quotient_repr = cfg_iter!(quotient_polynomial_coeffs)
-        .map(|s| s.into_repr())
+        .map(|s| s.into_bigint())
         .collect::<Vec<_>>();
 
     assert_eq!(
@@ -210,8 +214,8 @@ fn create_kzg_opening<G: AffineCurve>(
     // used which is compatible with Groth16 CRS instead of the original paper
     // of Bunz'19
     let (a, b) = (
-        VariableBaseMSM::multi_scalar_mul(&srs_powers_alpha_table, &quotient_repr),
-        VariableBaseMSM::multi_scalar_mul(&srs_powers_beta_table, &quotient_repr),
+        G::Group::msm_bigint(&srs_powers_alpha_table, &quotient_repr),
+        G::Group::msm_bigint(&srs_powers_beta_table, &quotient_repr),
     );
     Ok(KZGOpening::new_from_proj(a, b))
 }
@@ -272,7 +276,7 @@ fn polynomial_coefficients_from_transcript<F: Field>(transcript: &[F], r_shift: 
     coefficients
 }
 
-pub fn prove_commitment_v<G: AffineCurve>(
+pub fn prove_commitment_v<G: AffineRepr>(
     srs_powers_alpha_table: &[G],
     srs_powers_beta_table: &[G],
     transcript: &[G::ScalarField],
@@ -298,7 +302,7 @@ pub fn prove_commitment_v<G: AffineCurve>(
     )
 }
 
-pub fn prove_commitment_w<G: AffineCurve>(
+pub fn prove_commitment_w<G: AffineRepr>(
     srs_powers_alpha_table: &[G],
     srs_powers_beta_table: &[G],
     transcript: &[G::ScalarField],
