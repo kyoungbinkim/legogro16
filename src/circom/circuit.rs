@@ -188,6 +188,21 @@ pub mod tests {
             .unwrap();
     }
 
+    // 64bit range
+    #[test]
+    fn test_range_proof(){
+        generate_params_and_test_circuit::<Bn254>(
+            "test-vectors/bn128/range_proof.r1cs",
+            1,
+            None,
+        );
+        generate_params_and_test_circuit::<Bls12_381>(
+            "test-vectors/bls12-381/range_proof.r1cs",
+            1,
+            None,
+        );
+    }
+
     #[test]
     fn multiply2() {
         fn check<E: Pairing>(

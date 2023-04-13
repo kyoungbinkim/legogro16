@@ -108,6 +108,29 @@ pub fn generate_params_prove_and_verify<
     prove_and_verify_circuit(circuit, &params, commit_witness_count)
 }
 
+fn test_range_proof<E: Pairing>(r1cs_file_path: &str, wasm_file_path: &str) {
+    let value = E::ScalarField::from(18446744073709551615u64);
+    
+
+    let mut inputs = HashMap::new();
+    inputs.insert("value".to_string(), vec![value]);
+
+    // 밑은 에러뜸 64비트 넘는다
+    // inputs.insert("value".to_string(), vec![value, E::ScalarField::from(2u64) , E::ScalarField::from(2u64)]);
+
+    let public = generate_params_prove_and_verify::<E, _>(
+        r1cs_file_path,
+        wasm_file_path,
+        1,
+        inputs.clone().into_iter(),
+        1,
+    );
+
+    println!("public len :  {}", public.len());
+    
+    // println!("commit : {:?} \n", public.get(0).expect("test").into_bigint());
+}
+
 fn multiply2<E: Pairing>(r1cs_file_path: &str, wasm_file_path: &str) {
     let mut rng = StdRng::seed_from_u64(100u64);
     let a = E::ScalarField::rand(&mut rng);
@@ -841,6 +864,20 @@ fn greater_than_or_public<E: Pairing>(r1cs_file_path: &str, wasm_file_path: &str
     assert_eq!(public[0], E::ScalarField::from(0u64));
     assert_eq!(public[1], E::ScalarField::from(big1));
     assert_eq!(public[2], E::ScalarField::from(big2));
+}
+
+#[test]
+fn range_proof_bn128() {
+    let r1cs_file_path = "test-vectors/bn128/range_proof.r1cs";
+    let wasm_file_path = "test-vectors/bn128/range_proof.wasm";
+    test_range_proof::<Bn254>(r1cs_file_path, wasm_file_path)
+}
+
+#[test]
+fn range_proof_bls12_381() {
+    let r1cs_file_path = "test-vectors/bls12-381/range_proof.r1cs";
+    let wasm_file_path = "test-vectors/bls12-381/range_proof.wasm";
+    test_range_proof::<Bls12_381>(r1cs_file_path, wasm_file_path)
 }
 
 #[test]
