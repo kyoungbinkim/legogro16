@@ -14,6 +14,7 @@ use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystem};
 use ark_std::rand::prelude::StdRng;
 use ark_std::rand::SeedableRng;
 use ark_std::UniformRand;
+use std::{time::SystemTime};
 use std::collections::{BTreeSet, HashMap};
 use std::ops::AddAssign;
 use std::path::PathBuf;
@@ -63,10 +64,29 @@ pub fn prove_and_verify_circuit<E: Pairing>(
         .skip(1 + public_inputs.len())
         .take(commit_witness_count)
         .collect::<Vec<_>>();
+
+    // v : opening key of proof.d (pedersen commitment)
     // Randomness for the committed witness in proof.d
     let mut rng = StdRng::seed_from_u64(300u64);
     let v = E::ScalarField::rand(&mut rng);
+
+    // pub struct Proof<E: Pairing> {
+    //     pub a: E::G1Affine,
+    //     pub b: E::G2Affine,
+    //     pub c: E::G1Affine,
+    //     pub d: E::G1Affine,  // commitment of private input
+    // }
+    let proving_start = SystemTime::now();
     let proof = create_random_proof(circuit, v, params, &mut rng).unwrap();
+    let proving_end   = SystemTime::now();
+    let difference = proving_end.duration_since(proving_start).expect("Proving Time");
+
+    // println!("proof.a : {}", proof.a);
+    // println!("proof.b : {}", proof.b);
+    // println!("proof.c : {}", proof.c);
+    println!("proof.d(commitment) : {}", proof.d);
+    println!("commitment opening key : {}", v);
+    println!("proving time : {difference:?}");
     println!("Proof generated");
 
     let pvk = prepare_verifying_key::<E>(&params.vk);
@@ -96,6 +116,12 @@ pub fn generate_params_prove_and_verify<
 ) -> Vec<E::ScalarField> {
     let mut circuit = CircomCircuit::<E>::from_r1cs_file(abs_path(r1cs_file_path)).unwrap();
 
+
+    // pub struct ProvingKey<E: Pairing> {
+    //     /// The underlying verification key.
+    //     pub vk: VerifyingKey<E>,
+    //     pub common: ProvingKeyCommon<E>,
+    // }
     let (_, params) = gen_params::<E>(commit_witness_count, circuit.clone());
     println!("Params generated");
 
@@ -127,8 +153,6 @@ fn test_range_proof<E: Pairing>(r1cs_file_path: &str, wasm_file_path: &str) {
     );
 
     println!("public len :  {}", public.len());
-    
-    // println!("commit : {:?} \n", public.get(0).expect("test").into_bigint());
 }
 
 fn multiply2<E: Pairing>(r1cs_file_path: &str, wasm_file_path: &str) {
@@ -868,6 +892,7 @@ fn greater_than_or_public<E: Pairing>(r1cs_file_path: &str, wasm_file_path: &str
 
 #[test]
 fn range_proof_bn128() {
+    println!("BN-128");
     let r1cs_file_path = "test-vectors/bn128/range_proof.r1cs";
     let wasm_file_path = "test-vectors/bn128/range_proof.wasm";
     test_range_proof::<Bn254>(r1cs_file_path, wasm_file_path)
@@ -875,6 +900,7 @@ fn range_proof_bn128() {
 
 #[test]
 fn range_proof_bls12_381() {
+    println!("BLS12-381");
     let r1cs_file_path = "test-vectors/bls12-381/range_proof.r1cs";
     let wasm_file_path = "test-vectors/bls12-381/range_proof.wasm";
     test_range_proof::<Bls12_381>(r1cs_file_path, wasm_file_path)
