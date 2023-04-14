@@ -8,6 +8,7 @@ use crate::{
 };
 use ark_bls12_381::Bls12_381;
 use ark_bn254::Bn254;
+use ark_ec::AffineRepr;
 use ark_ec::pairing::Pairing;
 use ark_ff::{Field, One, PrimeField, Zero};
 use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystem};
@@ -84,7 +85,7 @@ pub fn prove_and_verify_circuit<E: Pairing>(
     // println!("proof.a : {}", proof.a);
     // println!("proof.b : {}", proof.b);
     // println!("proof.c : {}", proof.c);
-    println!("proof.d(commitment) : {}", proof.d);
+    println!("proof.d(commitment) : {}", proof.d.into_group());
     println!("commitment opening key : {}", v);
     println!("proving time : {difference:?}");
     println!("Proof generated");
