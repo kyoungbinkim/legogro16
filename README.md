@@ -4,8 +4,17 @@ https://github.com/kyoungbinkim/legogro16/blob/comm-wit/src/circom/tests.rs#L137
 https://github.com/kyoungbinkim/legogro16/blob/comm-wit/src/circom/tests.rs#L894 : BN128 (BN254) Test code
 https://github.com/kyoungbinkim/legogro16/blob/comm-wit/src/circom/tests.rs#L902 : BLS12-381 Test code
 
-<h3 align="center"> 실험결과 </h3>
+<h2 align="center"> 실험결과 </h2>
 
+### 실험환경 macbook Pro M1 32G RAM
+<p align="center">
+    <img src="./BN-128-Test.png"/>
+    BN128 (BN254) 실험결과 : proving time 6~7ms
+    <br/><br/><br/><br/>
+    <img src="./BLS12-381-Test.png"/>
+    BLS12-381 실험결과 : proving time 8ms
+    <br/><br/><br/><br/>
+</p>
 
 <h1 align="center">legogroth16</h1>
 
