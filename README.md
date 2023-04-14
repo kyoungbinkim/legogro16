@@ -1,4 +1,5 @@
-<h2 align="center"> 경빈's readme </h2>
+<h1 align="center"> 경빈🛠️ </h1>
+https://github.com/kyoungbinkim/legogro16/blob/comm-wit/test-vectors/circuits/range_proof.circom : range_proof circom code 추가
 
 https://github.com/kyoungbinkim/legogro16/blob/comm-wit/src/circom/tests.rs#L137 : range_proof code 추가
 https://github.com/kyoungbinkim/legogro16/blob/comm-wit/src/circom/tests.rs#L894 : BN128 (BN254) Test code
