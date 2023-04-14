@@ -1,3 +1,12 @@
+<h2 align="center"> 경빈's readme </h2>
+
+https://github.com/kyoungbinkim/legogro16/blob/comm-wit/src/circom/tests.rs#L137 : range_proof code 추가
+https://github.com/kyoungbinkim/legogro16/blob/comm-wit/src/circom/tests.rs#L894 : BN128 (BN254) Test code
+https://github.com/kyoungbinkim/legogro16/blob/comm-wit/src/circom/tests.rs#L902 : BLS12-381 Test code
+
+<h3 align="center"> 실험결과 </h3>
+
+
 <h1 align="center">legogroth16</h1>
 
 <p align="center">
