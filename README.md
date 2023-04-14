@@ -10,7 +10,7 @@ https://github.com/kyoungbinkim/legogro16/blob/comm-wit/src/circom/tests.rs#L903
 ### 실험환경 macbook Pro M1 32G RAM
 <p align="center">
     <img src="./BN-128-Test.png"/>
-    BN128 (BN254) 실험결과 : proving time 6~7ms
+    BN128 (BN254) 실험결과 : proving time 5~6ms
     <br/><br/><br/><br/>
     <img src="./BLS12-381-Test.png"/>
     BLS12-381 실험결과 : proving time 8ms
